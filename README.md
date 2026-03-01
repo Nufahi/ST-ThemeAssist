@@ -1,8 +1,9 @@
 # ST-ThemeAssist ༊༄.°
 🎨 SillyTavern extension for bulk theme management – backup, restore, export as ZIP, favorites, and auto-apply on import.
 
-## Features
+<img width="701" height="354" alt="image" src="https://github.com/user-attachments/assets/715afc92-a23d-4164-a0ff-3a2ebffb5f91" />
 
+## Features
 ### Auto-Apply on Import
 When you import a new theme (via SillyTavern's native import), ThemeAssist automatically detects and applies it — no need to manually select it from the dropdown.
 
@@ -13,13 +14,17 @@ A full-featured popup for managing all your themes in one place:
 - **Bulk Export** — export selected themes as a single `.zip` file (no per-file save dialogs)
 - **Bulk Delete** — delete multiple themes at once, with optional skip-confirmation mode
 - **Favorites** — star your favorite themes so they always appear at the top
-
+  
+  <img width="765" height="666" alt="image" src="https://github.com/user-attachments/assets/4b6686cc-1bb9-4db7-8142-b22ed4a6dcbd" />
+  
 ### Backup & Restore
 - **Backup All** — exports every installed theme into a single `.zip` archive with one click
 - **Restore** — import themes from `.zip` or individual `.json` files, bulk importing them back into SillyTavern
 
 ### Quick Favorites
 Pin your most-used themes for one-click switching directly from the settings panel. No more scrolling through dozens of themes.
+
+<img width="710" height="451" alt="image" src="https://github.com/user-attachments/assets/30e61653-164f-4a60-9bf8-190f9ac71d53" />
 
 ## Installation
 
