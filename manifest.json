@@ -1,0 +1,12 @@
+{
+    "display_name": "Theme Assist",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Nufahi",
+    "version": "1.2.0",
+    "homePage": "https://github.com/Nufahi/ST-ThemeAssist",
+    "auto_update": true
+}
