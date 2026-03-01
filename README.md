@@ -28,7 +28,7 @@ Pin your most-used themes for one-click switching directly from the settings pan
 2. Go to **Extensions** → **Install Extension**
 3. Paste the repository URL:
    ```
-   https://github.com/YOUR_USERNAME/ST-ThemeAssist
+  https://github.com/Nufahi/ST-ThemeAssist
    ```
 4. Click **Save**
 5. Reload SillyTavern (`Ctrl + Shift + R`)
@@ -41,13 +41,13 @@ Pin your most-used themes for one-click switching directly from the settings pan
    ```
 3. Clone or copy the `ST-ThemeAssist` folder there:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ST-ThemeAssist
+   git clone https://github.com/Nufahi/ST-ThemeAssist
    ```
 4. Reload SillyTavern (`Ctrl + Shift + R`)
 
 ## Usage
 
-After installation, find **𐙚Theme Assist** in the Extensions settings panel (bottom of the sidebar).
+After installation, find **Theme Assist** in the Extensions settings panel (bottom of the sidebar).
 
 ### Backing Up Themes
 Click **Backup All** to export every theme as a single `.zip` file. The file downloads automatically — no confirmation dialogs for each theme.
