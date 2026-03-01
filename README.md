@@ -28,7 +28,7 @@ Pin your most-used themes for one-click switching directly from the settings pan
 2. Go to **Extensions** → **Install Extension**
 3. Paste the repository URL:
    ```
-  https://github.com/Nufahi/ST-ThemeAssist
+   https://github.com/Nufahi/ST-ThemeAssist
    ```
 4. Click **Save**
 5. Reload SillyTavern (`Ctrl + Shift + R`)
