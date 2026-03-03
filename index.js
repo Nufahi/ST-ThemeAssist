@@ -268,7 +268,7 @@ async function restoreThemes(themeSelect) {
 
         for (const jsonFile of jsonFiles) {
             try {
-                await importViaNativeButton(jsonFile);
+                const result = await importThemeWithReplacePrompt(jsonFile, themeSelect);
                 imported++;
                 console.log(`[${MODULE_NAME}] Imported: "${jsonFile.name}" (${imported}/${jsonFiles.length})`);
                 await new Promise(r => setTimeout(r, 500));
@@ -309,6 +309,166 @@ function importViaNativeButton(file) {
         fileInput.dispatchEvent(changeEvent);
 
         setTimeout(() => resolve(), 800);
+    });
+}
+
+
+
+async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
+    let presetName = null;
+    let freshFile = jsonFile;
+
+    try {
+        const text = await jsonFile.text();
+        const data = JSON.parse(text);
+        presetName = data.preset_name || data.name || null;
+        freshFile = new File([text], jsonFile.name, { type: jsonFile.type || 'application/json' });
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] Failed to read theme file "${jsonFile.name}":`, err);
+        await importViaNativeButton(jsonFile);
+        return;
+    }
+
+    if (!presetName) {
+        console.warn(`[${MODULE_NAME}] No preset_name in "${jsonFile.name}", importing as usual`);
+        await importViaNativeButton(freshFile);
+        return;
+    }
+
+    const existingOption = Array.from(themeSelect.options).find(opt => opt.value === presetName);
+
+    if (!existingOption) {
+        await importViaNativeButton(freshFile);
+        toastr.success(`Imported new theme: "${presetName}"`, DISPLAY_NAME);
+        return;
+    }
+
+    return new Promise(async (resolve, reject) => {
+        const overlay = document.createElement('div');
+        overlay.id = 'ta_popup_overlay';
+        overlay.innerHTML = `
+            <div class="ta-popup">
+                <div class="ta-popup-header">
+                    <h3>Theme already exists</h3>
+                    <span id="ta_replace_close" class="fa-solid fa-xmark ta-close-btn"></span>
+                </div>
+                <div class="ta-popup-body">
+                    <p>Theme "<b>${presetName}</b>" already exists.</p>
+                    <p>Delete the old one first, then import the new JSON.</p>
+                </div>
+                <div class="ta-popup-footer">
+                    <div class="ta-footer-buttons">
+                        <div id="ta_replace_cancel" class="menu_button menu_button_icon interactable" style="background:#555;">
+                            <i class="fa-solid fa-ban"></i> Cancel
+                        </div>
+                        <div id="ta_replace_confirm" class="menu_button menu_button_icon interactable" style="background:#8b2035;">
+                            <i class="fa-solid fa-trash-can"></i> Delete old
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                overlay.remove();
+                toastr.info('Cancelled', DISPLAY_NAME);
+                resolve(false);
+            }
+        });
+
+        document.body.appendChild(overlay);
+
+        const close = overlay.querySelector('#ta_replace_close');
+        const cancel = overlay.querySelector('#ta_replace_cancel');
+        const confirmBtn = overlay.querySelector('#ta_replace_confirm');
+
+        const cleanup = () => {
+            overlay.remove();
+        };
+
+        cancel.addEventListener('click', () => {
+            cleanup();
+            toastr.info('Cancelled', DISPLAY_NAME);
+            resolve(false);
+        });
+
+        close.addEventListener('click', () => {
+            cleanup();
+            toastr.info('Cancelled', DISPLAY_NAME);
+            resolve(false);
+        });
+
+        confirmBtn.addEventListener('click', async () => {
+            try {
+                themeSelect.value = presetName;
+                $(themeSelect).trigger('change');
+                await new Promise(r => setTimeout(r, 400));
+
+                const deleteBtn = document.getElementById('ui-preset-delete-button');
+                if (!deleteBtn) throw new Error('Delete button not found');
+
+                deleteBtn.click();
+
+                const ok = await waitForPopupAndConfirm();
+                if (!ok) {
+                    throw new Error('Delete confirmation failed');
+                }
+
+                await new Promise(r => setTimeout(r, 400));
+
+                overlay.querySelector('.ta-popup').innerHTML = `
+                    <div class="ta-popup-header">
+                        <h3>Now import the new theme</h3>
+                        <span id="ta_replace_close2" class="fa-solid fa-xmark ta-close-btn"></span>
+                    </div>
+                    <div class="ta-popup-body">
+                        <p>Old "<b>${presetName}</b>" deleted successfully!</p>
+                        <p>Click the button below to import your new JSON.</p>
+                    </div>
+                    <div class="ta-popup-footer">
+                        <div class="ta-footer-buttons">
+                            <div id="ta_import_now" class="menu_button menu_button_icon interactable" style="background:#28a745;">
+                                <i class="fa-solid fa-file-import"></i> Import new theme
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                overlay.querySelector('#ta_replace_close2').addEventListener('click', () => {
+                    cleanup();
+                    resolve(true);
+                });
+
+                overlay.querySelector('#ta_import_now').addEventListener('click', () => {
+                    cleanup();
+
+                    const importBtn = document.getElementById('ui_preset_import_button');
+                    if (!importBtn) {
+                        toastr.error('Import button not found', DISPLAY_NAME);
+                        resolve(true);
+                        return;
+                    }
+
+                    const fileInput = importBtn.querySelector('input[type="file"]');
+                    if (!fileInput) {
+                        toastr.error('File input inside import button not found', DISPLAY_NAME);
+                        resolve(true);
+                        return;
+                    }
+
+                    fileInput.onclick = null;
+                    fileInput.click();
+                    resolve(true);
+                });
+
+            } catch (err) {
+                console.error(`[${MODULE_NAME}] Failed to delete "${presetName}":`, err);
+                toastr.error(`Failed to delete "${presetName}"`, DISPLAY_NAME);
+                cleanup();
+                reject(err);
+            }
+        });
     });
 }
 
