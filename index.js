@@ -442,23 +442,7 @@ async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
 
                 overlay.querySelector('#ta_import_now').addEventListener('click', () => {
                     cleanup();
-
-                    const importBtn = document.getElementById('ui_preset_import_button');
-                    if (!importBtn) {
-                        toastr.error('Import button not found', DISPLAY_NAME);
-                        resolve(true);
-                        return;
-                    }
-
-                    const fileInput = importBtn.querySelector('input[type="file"]');
-                    if (!fileInput) {
-                        toastr.error('File input inside import button not found', DISPLAY_NAME);
-                        resolve(true);
-                        return;
-                    }
-
-                    fileInput.onclick = null;
-                    fileInput.click();
+                    toastr.info(`Now use the standard import button to load the new "${presetName}" JSON.`, DISPLAY_NAME);
                     resolve(true);
                 });
 
