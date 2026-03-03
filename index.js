@@ -55,6 +55,13 @@ jQuery(async () => {
 
         const observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
+                for (const node of mutation.removedNodes) {
+                    if (node.tagName === 'OPTION' && knownThemes.has(node.value)) {
+                        knownThemes.delete(node.value);
+                        console.log(`[${MODULE_NAME}] Theme removed from tracking: "${node.value}"`);
+                    }
+                }
+
                 for (const node of mutation.addedNodes) {
                     if (node.tagName === 'OPTION' && !knownThemes.has(node.value)) {
                         const newThemeName = node.value;
