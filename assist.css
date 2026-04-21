@@ -420,3 +420,300 @@
 /* Popup paragraphs */
 .ta-popup-body p { margin: 8px 0; line-height: 1.45; }
 .ta-popup-body p:first-child { margin-top: 0; }
+
+
+/* ============================================================
+ * MOBILE / RESPONSIVE
+ * ============================================================ */
+
+/* Tablets and smaller */
+@media (max-width: 768px) {
+    #ta_block .ta-toolbar .ta-btn {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+
+    #ta_popup_overlay .ta-popup {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 90vh;
+    }
+
+    .ta-popup-body {
+        padding: 8px 10px;
+        max-height: 60vh;
+    }
+
+    .ta-theme-row {
+        padding: 8px 6px;
+        gap: 8px;
+    }
+
+    .ta-theme-row .ta-theme-name {
+        font-size: 14px;
+        line-height: 1.3;
+    }
+
+    .ta-check {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+    }
+
+    .ta-star {
+        width: 22px;
+        height: 22px;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .ta-popup-header h3 {
+        font-size: 15px;
+    }
+
+    .ta-popup-footer {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px 10px;
+    }
+
+    .ta-footer-buttons {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .ta-bulk-controls {
+        flex-wrap: wrap;
+        gap: 8px 12px;
+    }
+
+    .ta-check-label {
+        font-size: 12px;
+    }
+
+    #ta_search_input {
+        font-size: 14px;
+        padding: 6px 8px;
+    }
+}
+
+/* Phones */
+@media (max-width: 480px) {
+    #ta_block .ta-inline-header {
+        padding: 6px 8px;
+        gap: 6px;
+    }
+
+    #ta_block .ta-inline-header .ta-title {
+        font-size: 13px;
+    }
+
+    #ta_block .ta-inline-last {
+        font-size: 11px;
+        max-width: 40%;
+    }
+
+    #ta_block .ta-toolbar {
+        gap: 4px;
+    }
+
+    #ta_block .ta-toolbar .ta-btn {
+        padding: 8px;
+        font-size: 12px;
+        min-width: 40px;
+    }
+
+    #ta_block .ta-toolbar .ta-btn span {
+        display: none;
+    }
+
+    #ta_block .ta-toolbar .ta-btn i {
+        margin: 0;
+        font-size: 14px;
+    }
+
+    #ta_popup_overlay .ta-popup {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        max-height: 95vh;
+        border-radius: 8px 8px 0 0;
+        margin-top: auto;
+    }
+
+    .ta-theme-row {
+        padding: 10px 8px;
+        gap: 10px;
+    }
+
+    .ta-theme-row .ta-theme-name {
+        font-size: 13px;
+    }
+
+    .ta-check {
+        width: 20px;
+        height: 20px;
+    }
+
+    .ta-star {
+        width: 24px;
+        height: 24px;
+        font-size: 18px;
+    }
+
+    .ta-inline-favs-title {
+        font-size: 12px;
+    }
+
+    .ta-fav-chip {
+        font-size: 12px;
+        padding: 4px 8px;
+    }
+
+    .ta-popup-footer {
+        padding: 10px 8px;
+    }
+
+    .ta-footer-buttons .ta-btn {
+        padding: 10px 14px;
+        font-size: 13px;
+    }
+
+    /* Make bulk-controls stack vertically */
+    .ta-bulk-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+}
+
+/* Touch-specific: larger hit targets */
+@media (hover: none) and (pointer: coarse) {
+    .ta-star,
+    .ta-check,
+    .ta-close-btn {
+        min-width: 32px;
+        min-height: 32px;
+    }
+
+    .ta-fav-chip {
+        min-height: 32px;
+        padding: 6px 10px;
+    }
+
+    .ta-theme-row {
+        min-height: 44px;
+    }
+}
+
+
+/* ============================================================
+ * CUSTOM CHECKBOXES — proper styled checkmarks everywhere
+ * ============================================================ */
+
+/* Theme row checkbox + bulk-controls checkbox */
+.ta-popup input[type="checkbox"].ta-check,
+.ta-popup .ta-check-label input[type="checkbox"] {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    margin: 0;
+    padding: 0;
+    border: 1.5px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.35));
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.ta-popup input[type="checkbox"].ta-check:hover,
+.ta-popup .ta-check-label input[type="checkbox"]:hover {
+    border-color: var(--SmartThemeEmColor, var(--SmartThemeQuoteColor, #8a7a5a));
+    background: rgba(255,255,255,0.05);
+}
+
+.ta-popup input[type="checkbox"].ta-check:checked,
+.ta-popup .ta-check-label input[type="checkbox"]:checked {
+    background: var(--SmartThemeEmColor, var(--SmartThemeQuoteColor, #8a7a5a));
+    border-color: var(--SmartThemeEmColor, var(--SmartThemeQuoteColor, #8a7a5a));
+}
+
+/* Checkmark via pseudo-element */
+.ta-popup input[type="checkbox"].ta-check:checked::after,
+.ta-popup .ta-check-label input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 0px;
+    width: 5px;
+    height: 10px;
+    border: solid var(--SmartThemeBodyColor, #fff);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
+
+/* Mobile: slightly bigger for touch */
+@media (max-width: 768px) {
+    .ta-popup input[type="checkbox"].ta-check,
+    .ta-popup .ta-check-label input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        min-width: 20px;
+        min-height: 20px;
+        border-radius: 5px;
+    }
+    .ta-popup input[type="checkbox"].ta-check:checked::after,
+    .ta-popup .ta-check-label input[type="checkbox"]:checked::after {
+        left: 5px;
+        top: 1px;
+        width: 5px;
+        height: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .ta-popup input[type="checkbox"].ta-check,
+    .ta-popup .ta-check-label input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        min-height: 22px;
+    }
+    .ta-popup input[type="checkbox"].ta-check:checked::after,
+    .ta-popup .ta-check-label input[type="checkbox"]:checked::after {
+        left: 6px;
+        top: 2px;
+    }
+}
+
+/* Label alignment fix */
+.ta-check-label {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.ta-check-label span {
+    line-height: 1.2;
+}
+
+/* Prevent theme-wide input styles from overriding us */
+#ta_popup_overlay input[type="checkbox"] {
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+#ta_popup_overlay input[type="checkbox"]:focus {
+    outline: 2px solid var(--SmartThemeEmColor, rgba(255,255,255,0.3));
+    outline-offset: 1px;
+}
