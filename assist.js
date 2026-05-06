@@ -26,6 +26,24 @@ function getSettings() {
     if (typeof s.skipConfirm !== 'boolean') s.skipConfirm = true;
     if (typeof s.collapsed !== 'boolean') s.collapsed = true;
     if (typeof s.autoConfirmImport !== 'boolean') s.autoConfirmImport = true;
+    // Folders are "soft" tags with a folder-like UI: a theme may belong to
+    // any number of folders at the same time.
+    if (!Array.isArray(s.folders)) s.folders = [];
+    // Sort mode for the theme list: 'alpha' (A→Z, favorites first) or 'date'
+    // (most recently added first, based on <option> order in #themes).
+    if (typeof s.sortMode !== 'string' || !['alpha', 'date'].includes(s.sortMode)) {
+        s.sortMode = 'alpha';
+    }
+    // Normalize legacy folder shapes in place, without recreating objects,
+    // so references taken from previous calls stay valid.
+    for (let i = s.folders.length - 1; i >= 0; i--) {
+        const f = s.folders[i];
+        if (!f || typeof f !== 'object') { s.folders.splice(i, 1); continue; }
+        if (typeof f.id !== 'string' || !f.id) f.id = genFolderId();
+        if (typeof f.name !== 'string') f.name = 'Folder';
+        if (!Array.isArray(f.themes)) f.themes = [];
+        else f.themes = f.themes.filter(t => typeof t === 'string');
+    }
     return s;
 }
 function saveSettings() {
@@ -39,6 +57,76 @@ function toggleFavorite(themeName) {
     else s.favorites.splice(idx, 1);
     saveSettings();
     return idx === -1;
+}
+
+/* ============================================================
+ * FOLDERS API
+ * Folders are soft, overlapping collections: a single theme can
+ * live in any number of folders. Stored as:
+ *   { id: string, name: string, themes: string[] }
+ * ============================================================ */
+function genFolderId() {
+    return 'f_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+function getFolders() { return getSettings().folders; }
+function getFolderById(id) { return getFolders().find(f => f.id === id) || null; }
+function createFolder(name) {
+    const s = getSettings();
+    const folder = { id: genFolderId(), name: String(name || 'Folder').trim() || 'Folder', themes: [] };
+    s.folders.push(folder);
+    saveSettings();
+    return folder;
+}
+function deleteFolder(id) {
+    const s = getSettings();
+    const idx = s.folders.findIndex(f => f.id === id);
+    if (idx === -1) return false;
+    s.folders.splice(idx, 1);
+    saveSettings();
+    return true;
+}
+function renameFolder(id, newName) {
+    const f = getFolderById(id);
+    if (!f) return false;
+    const name = String(newName || '').trim();
+    if (!name) return false;
+    f.name = name;
+    saveSettings();
+    return true;
+}
+/** Toggles a theme in a folder. Returns true if theme is now in folder. */
+function toggleThemeInFolder(folderId, themeName) {
+    const f = getFolderById(folderId);
+    if (!f) return false;
+    const idx = f.themes.indexOf(themeName);
+    if (idx === -1) f.themes.push(themeName);
+    else f.themes.splice(idx, 1);
+    saveSettings();
+    return idx === -1;
+}
+/** Adds a theme to a folder (no-op if already there). */
+function addThemeToFolder(folderId, themeName) {
+    const f = getFolderById(folderId);
+    if (!f) return false;
+    if (!f.themes.includes(themeName)) {
+        f.themes.push(themeName);
+        saveSettings();
+    }
+    return true;
+}
+/** Remove a theme from ALL folders (e.g. when the theme is deleted). */
+function purgeThemeFromFolders(themeName) {
+    const s = getSettings();
+    let changed = false;
+    for (const f of s.folders) {
+        const i = f.themes.indexOf(themeName);
+        if (i !== -1) { f.themes.splice(i, 1); changed = true; }
+    }
+    if (changed) saveSettings();
+}
+/** Returns folder ids that contain themeName. */
+function foldersOfTheme(themeName) {
+    return getFolders().filter(f => f.themes.includes(themeName)).map(f => f.id);
 }
 
 /* ============================================================
@@ -317,14 +405,38 @@ function openThemeManager(themeSelect) {
                             <span>Auto-accept @import</span>
                         </label>
                     </div>
-                    <div class="ta-bulk-controls-info">
+                    <div class="ta-folders-wrap">
+                        <div class="ta-folders-header">
+                            <span class="ta-folders-title">
+                                <i class="fa-solid fa-folder"></i>
+                                <span>Folders</span>
+                            </span>
+                            <div class="ta-folders-actions">
+                                <div class="menu_button ta-btn ta-btn-small" id="ta_new_folder_btn" title="Create a new folder">
+                                    <i class="fa-solid fa-plus"></i>&nbsp;New
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ta_folders_list" class="ta-folders-list"></div>
+                    </div>
+                    <div class="ta-list-controls">
                         <span id="ta_stats">${allThemes.length} themes · ${favs.size} favorites</span>
+                        <div class="ta-sort-wrap" title="Sort order">
+                            <i class="fa-solid fa-arrow-down-wide-short"></i>
+                            <select id="ta_sort_mode" class="ta-sort-select">
+                                <option value="alpha">A → Z</option>
+                                <option value="date">Date added</option>
+                            </select>
+                        </div>
                     </div>
                     <div id="ta_theme_list" class="ta-theme-list"></div>
                 </div>
                 <div class="ta-popup-footer">
                     <div id="ta_selected_count" class="ta-bulk-controls-info">0 selected</div>
                     <div class="ta-footer-buttons">
+                        <div class="menu_button ta-btn" id="ta_bulk_folder_btn" title="Add selected themes to a folder">
+                            <i class="fa-solid fa-folder-plus"></i>&nbsp;Add to folder
+                        </div>
                         <div class="menu_button ta-btn" id="ta_export_btn" title="Export selected themes (zip if multiple)">
                             <i class="fa-solid fa-file-export"></i>&nbsp;Export
                         </div>
@@ -343,28 +455,97 @@ function openThemeManager(themeSelect) {
     const $selectAll = overlay.find('#ta_select_all');
     const $skipConfirm = overlay.find('#ta_skip_confirm');
     const $selectedCount = overlay.find('#ta_selected_count');
+    const $foldersList = overlay.find('#ta_folders_list');
+    const $sortMode = overlay.find('#ta_sort_mode');
+
+    // Date-added index: the order themes appear in the <select> element is the
+    // order ST added them, which matches the on-disk sort (alphabetical by
+    // filename). For a user-perceivable "date added" we use this order and
+    // reverse it so newest is on top.
+    const themeOrder = new Map();
+    allThemes.forEach((n, i) => themeOrder.set(n, i));
+
+    // Currently active folder filter (null = no filter, show everything).
+    let activeFolderId = null;
+
+    $sortMode.val(settings.sortMode);
+
+    function renderFolders() {
+        const folders = getFolders();
+        $foldersList.empty();
+        if (folders.length === 0) {
+            $foldersList.html('<div class="ta-folders-empty">No folders yet. Click <b>New</b> to create one.</div>');
+            return;
+        }
+        // Alphabetical sort of folders for stability.
+        const sorted = [...folders].sort((a, b) => a.name.localeCompare(b.name));
+        for (const folder of sorted) {
+            const isActive = folder.id === activeFolderId;
+            const count = folder.themes.length;
+            const card = $(`
+                <div class="ta-folder-card ${isActive ? 'ta-folder-active' : ''}" title="${escapeHtml(folder.name)}">
+                    <i class="fa-solid ${isActive ? 'fa-folder-open' : 'fa-folder'} ta-folder-icon"></i>
+                    <span class="ta-folder-name">${escapeHtml(folder.name)}</span>
+                    <span class="ta-folder-count">${count}</span>
+                    <span class="ta-folder-edit" title="Edit folder"><i class="fa-solid fa-pen"></i></span>
+                </div>
+            `);
+            card.on('click', (e) => {
+                if ($(e.target).closest('.ta-folder-edit').length) return;
+                activeFolderId = isActive ? null : folder.id;
+                renderFolders();
+                renderList();
+            });
+            card.find('.ta-folder-edit').on('click', (e) => {
+                e.stopPropagation();
+                openFolderEditor(folder.id);
+            });
+            $foldersList.append(card);
+        }
+    }
 
     function renderList() {
         const q = $search.val().toLowerCase().trim();
         $list.empty();
-        const sorted = [...allThemes].sort((a, b) => {
+
+        // Apply folder filter first (if any).
+        let pool = allThemes;
+        if (activeFolderId) {
+            const f = getFolderById(activeFolderId);
+            if (f) {
+                const set = new Set(f.themes);
+                pool = allThemes.filter(n => set.has(n));
+            }
+        }
+
+        const mode = settings.sortMode;
+        const sorted = [...pool].sort((a, b) => {
+            // Favorites always float to the top in both sort modes.
             const af = favs.has(a), bf = favs.has(b);
             if (af !== bf) return af ? -1 : 1;
+            if (mode === 'date') {
+                // Most recently added first. Unknown themes go last.
+                return (themeOrder.get(b) ?? -1) - (themeOrder.get(a) ?? -1);
+            }
             return a.localeCompare(b);
         });
+
         for (const name of sorted) {
             if (q && !name.toLowerCase().includes(q)) continue;
             const isCurrent = name === currentTheme;
             const isFav = favs.has(name);
+            const inFolders = foldersOfTheme(name).length;
             const safeName = escapeHtml(name);
             const row = $(`
                 <div class="ta-theme-item ${isCurrent ? 'ta-theme-current' : ''}">
                     <input type="checkbox" class="ta-check">
                     <span class="ta-star ${isFav ? 'ta-star-active' : ''}" title="Toggle favorite"></span>
                     <span class="ta-theme-name">${safeName}</span>
+                    <span class="ta-theme-folders ${inFolders ? 'ta-theme-folders-active' : ''}" title="Manage folders">
+                        <i class="fa-solid fa-folder-plus"></i>${inFolders ? `<span class="ta-theme-folders-count">${inFolders}</span>` : ''}
+                    </span>
                 </div>
             `);
-            // Use jQuery .data() to avoid HTML-attr injection on the checkbox
             row.find('.ta-check').data('theme', name);
             row.find('.ta-star').on('click', (e) => {
                 e.stopPropagation();
@@ -378,6 +559,10 @@ function openThemeManager(themeSelect) {
                 applyThemeByName(themeSelect, name);
                 toastr.success(`Applied: "${name}"`, DISPLAY_NAME);
             });
+            row.find('.ta-theme-folders').on('click', (e) => {
+                e.stopPropagation();
+                openThemeFolderPicker(name);
+            });
             row.find('.ta-check').on('change', updateSelectedCount);
             $list.append(row);
         }
@@ -386,6 +571,200 @@ function openThemeManager(themeSelect) {
 
     function updateSelectedCount() {
         $selectedCount.text(`${overlay.find('.ta-check:checked').length} selected`);
+    }
+
+    /* ---------- Folder editor (rename / delete) ---------- */
+    function openFolderEditor(folderId) {
+        const f = getFolderById(folderId);
+        if (!f) return;
+        const editor = $(`
+            <div class="ta-mini-overlay">
+                <div class="ta-mini-popup">
+                    <div class="ta-mini-header">
+                        <span><i class="fa-solid fa-folder"></i>&nbsp;Edit folder</span>
+                        <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
+                    </div>
+                    <div class="ta-mini-body">
+                        <input type="text" class="ta-search-input ta-mini-input" maxlength="64" value="${escapeHtml(f.name)}">
+                        <div class="ta-mini-hint">${f.themes.length} theme(s) in this folder</div>
+                    </div>
+                    <div class="ta-mini-footer">
+                        <div class="menu_button ta-btn ta-btn-danger" data-act="del"><i class="fa-solid fa-trash"></i>&nbsp;Delete</div>
+                        <div class="menu_button ta-btn" data-act="save"><i class="fa-solid fa-check"></i>&nbsp;Save</div>
+                    </div>
+                </div>
+            </div>
+        `);
+        overlay.append(editor);
+        const $input = editor.find('.ta-mini-input');
+        $input.trigger('focus').trigger('select');
+        const close = () => editor.remove();
+        editor.find('.ta-close-btn').on('click', close);
+        editor.on('click', (e) => { if (e.target === editor[0]) close(); });
+        editor.find('[data-act=save]').on('click', () => {
+            const newName = $input.val().trim();
+            if (!newName) { toastr.warning('Name cannot be empty', DISPLAY_NAME); return; }
+            renameFolder(folderId, newName);
+            close();
+            renderFolders();
+            renderList();
+        });
+        editor.find('[data-act=del]').on('click', () => {
+            if (!confirm(`Delete folder "${f.name}"? Themes themselves won't be deleted.`)) return;
+            deleteFolder(folderId);
+            if (activeFolderId === folderId) activeFolderId = null;
+            close();
+            renderFolders();
+            renderList();
+        });
+        $input.on('keydown', (e) => {
+            if (e.key === 'Enter') editor.find('[data-act=save]').trigger('click');
+            if (e.key === 'Escape') close();
+        });
+    }
+
+    /* ---------- Theme ↔ folders picker ---------- */
+    function openThemeFolderPicker(themeName) {
+        const picker = $(`
+            <div class="ta-mini-overlay">
+                <div class="ta-mini-popup">
+                    <div class="ta-mini-header">
+                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;Folders for "${escapeHtml(themeName)}"</span>
+                        <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
+                    </div>
+                    <div class="ta-mini-body">
+                        <div class="ta-folder-checks" id="ta_folder_checks"></div>
+                        <div class="ta-mini-new-folder">
+                            <input type="text" class="ta-search-input ta-mini-input" placeholder="New folder name..." maxlength="64">
+                            <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-plus"></i></div>
+                        </div>
+                    </div>
+                    <div class="ta-mini-footer">
+                        <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                    </div>
+                </div>
+            </div>
+        `);
+        overlay.append(picker);
+        const $checks = picker.find('#ta_folder_checks');
+
+        function renderChecks() {
+            $checks.empty();
+            const folders = [...getFolders()].sort((a, b) => a.name.localeCompare(b.name));
+            if (folders.length === 0) {
+                $checks.html('<div class="ta-mini-hint">No folders yet. Create one below.</div>');
+                return;
+            }
+            const inIds = new Set(foldersOfTheme(themeName));
+            for (const f of folders) {
+                const row = $(`
+                    <label class="ta-check-label ta-folder-check-row">
+                        <input type="checkbox" ${inIds.has(f.id) ? 'checked' : ''}>
+                        <i class="fa-solid fa-folder"></i>
+                        <span>${escapeHtml(f.name)}</span>
+                    </label>
+                `);
+                row.find('input').on('change', function () {
+                    if (this.checked) addThemeToFolder(f.id, themeName);
+                    else {
+                        // Explicit remove (toggle would be fine too, but checkbox state is the source of truth).
+                        const folder = getFolderById(f.id);
+                        if (folder) {
+                            const i = folder.themes.indexOf(themeName);
+                            if (i !== -1) { folder.themes.splice(i, 1); saveSettings(); }
+                        }
+                    }
+                });
+                $checks.append(row);
+            }
+        }
+        renderChecks();
+
+        const close = () => { picker.remove(); renderFolders(); renderList(); };
+        picker.find('.ta-close-btn, [data-act=done]').on('click', close);
+        picker.on('click', (e) => { if (e.target === picker[0]) close(); });
+
+        picker.find('[data-act=create]').on('click', () => {
+            const $input = picker.find('.ta-mini-input');
+            const name = $input.val().trim();
+            if (!name) return;
+            const f = createFolder(name);
+            addThemeToFolder(f.id, themeName);
+            $input.val('');
+            renderChecks();
+        });
+        picker.find('.ta-mini-input').on('keydown', (e) => {
+            if (e.key === 'Enter') picker.find('[data-act=create]').trigger('click');
+        });
+    }
+
+    /* ---------- Bulk: add selected themes to folder ---------- */
+    function openBulkAddToFolder(themeNames) {
+        const picker = $(`
+            <div class="ta-mini-overlay">
+                <div class="ta-mini-popup">
+                    <div class="ta-mini-header">
+                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;Add ${themeNames.length} theme(s) to folder</span>
+                        <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
+                    </div>
+                    <div class="ta-mini-body">
+                        <div class="ta-folder-checks" id="ta_bulk_folders"></div>
+                        <div class="ta-mini-new-folder">
+                            <input type="text" class="ta-search-input ta-mini-input" placeholder="New folder name..." maxlength="64">
+                            <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-plus"></i></div>
+                        </div>
+                    </div>
+                    <div class="ta-mini-footer">
+                        <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                    </div>
+                </div>
+            </div>
+        `);
+        overlay.append(picker);
+        const $checks = picker.find('#ta_bulk_folders');
+
+        function draw() {
+            $checks.empty();
+            const folders = [...getFolders()].sort((a, b) => a.name.localeCompare(b.name));
+            if (folders.length === 0) {
+                $checks.html('<div class="ta-mini-hint">No folders yet. Create one below.</div>');
+                return;
+            }
+            for (const f of folders) {
+                const row = $(`
+                    <div class="ta-folder-check-row ta-bulk-row">
+                        <i class="fa-solid fa-folder"></i>
+                        <span class="ta-bulk-name">${escapeHtml(f.name)}</span>
+                        <span class="ta-folder-count">${f.themes.length}</span>
+                        <div class="menu_button ta-btn ta-btn-small" data-act="add"><i class="fa-solid fa-plus"></i>&nbsp;Add</div>
+                    </div>
+                `);
+                row.find('[data-act=add]').on('click', () => {
+                    for (const n of themeNames) addThemeToFolder(f.id, n);
+                    toastr.success(`Added ${themeNames.length} theme(s) to "${f.name}"`, DISPLAY_NAME);
+                    draw();
+                });
+                $checks.append(row);
+            }
+        }
+        draw();
+
+        const close = () => { picker.remove(); renderFolders(); renderList(); };
+        picker.find('.ta-close-btn, [data-act=done]').on('click', close);
+        picker.on('click', (e) => { if (e.target === picker[0]) close(); });
+
+        picker.find('[data-act=create]').on('click', () => {
+            const $input = picker.find('.ta-mini-input');
+            const name = $input.val().trim();
+            if (!name) return;
+            const f = createFolder(name);
+            for (const n of themeNames) addThemeToFolder(f.id, n);
+            $input.val('');
+            draw();
+        });
+        picker.find('.ta-mini-input').on('keydown', (e) => {
+            if (e.key === 'Enter') picker.find('[data-act=create]').trigger('click');
+        });
     }
 
     $search.on('input', renderList);
@@ -413,6 +792,12 @@ function openThemeManager(themeSelect) {
         await bulkExportThemes(sel);
     });
 
+    overlay.find('#ta_bulk_folder_btn').on('click', () => {
+        const sel = overlay.find('.ta-check:checked').map((_, el) => $(el).data('theme')).get();
+        if (sel.length === 0) { toastr.warning('Select themes first', DISPLAY_NAME); return; }
+        openBulkAddToFolder(sel);
+    });
+
     overlay.find('#ta_delete_btn').on('click', async () => {
         const sel = overlay.find('.ta-check:checked').map((_, el) => $(el).data('theme')).get();
         if (sel.length === 0) { toastr.warning('Select themes to delete', DISPLAY_NAME); return; }
@@ -422,6 +807,50 @@ function openThemeManager(themeSelect) {
         await bulkDeleteThemes(sel, themeSelect, skip);
     });
 
+    overlay.find('#ta_new_folder_btn').on('click', () => {
+        const dlg = $(`
+            <div class="ta-mini-overlay">
+                <div class="ta-mini-popup" style="width:360px">
+                    <div class="ta-mini-header">
+                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;New folder</span>
+                        <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
+                    </div>
+                    <div class="ta-mini-body">
+                        <input type="text" class="ta-search-input ta-mini-input" placeholder="Folder name..." maxlength="64">
+                    </div>
+                    <div class="ta-mini-footer">
+                        <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-check"></i>&nbsp;Create</div>
+                    </div>
+                </div>
+            </div>
+        `);
+        overlay.append(dlg);
+        const $input = dlg.find('.ta-mini-input');
+        $input.trigger('focus');
+        const close = () => dlg.remove();
+        dlg.find('.ta-close-btn').on('click', close);
+        dlg.on('click', (e) => { if (e.target === dlg[0]) close(); });
+        const create = () => {
+            const name = $input.val().trim();
+            if (!name) { toastr.warning('Name cannot be empty', DISPLAY_NAME); return; }
+            createFolder(name);
+            close();
+            renderFolders();
+        };
+        dlg.find('[data-act=create]').on('click', create);
+        $input.on('keydown', (e) => {
+            if (e.key === 'Enter') create();
+            if (e.key === 'Escape') close();
+        });
+    });
+
+    $sortMode.on('change', () => {
+        settings.sortMode = $sortMode.val();
+        saveSettings();
+        renderList();
+    });
+
+    renderFolders();
     renderList();
 }
 
@@ -568,6 +997,11 @@ async function bulkDeleteThemes(names, themeSelect, skipConfirm) {
     for (const name of names) {
         try {
             await deleteThemeByName(themeSelect, name, skipConfirm);
+            // Also clean the deleted theme out of favorites and folders.
+            const favs = getSettings().favorites;
+            const fi = favs.indexOf(name);
+            if (fi !== -1) { favs.splice(fi, 1); saveSettings(); }
+            purgeThemeFromFolders(name);
             await new Promise(r => setTimeout(r, 200));
             ok++;
         } catch (err) {

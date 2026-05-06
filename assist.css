@@ -396,6 +396,292 @@
     display: block;
 }
 
+/* ============ FOLDERS ============ */
+.ta-folders-wrap {
+    margin: 4px 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--ta-border);
+    border-radius: var(--ta-radius-sm);
+    background: var(--ta-hover);
+}
+
+.ta-folders-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.ta-folders-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.65;
+    font-weight: 600;
+}
+
+.ta-folders-title i { color: var(--ta-accent); }
+
+.ta-folders-actions { display: flex; gap: 6px; }
+
+.ta-btn-small {
+    padding: 4px 10px !important;
+    font-size: 0.85em !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ta-folders-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ta-folders-empty {
+    width: 100%;
+    padding: 8px 4px;
+    font-size: 0.85em;
+    opacity: 0.55;
+    font-style: italic;
+    text-align: center;
+}
+
+.ta-folder-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: var(--ta-radius-sm);
+    border: 1px solid var(--ta-border);
+    background: var(--ta-bg);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    max-width: 100%;
+    user-select: none;
+}
+
+.ta-folder-card:hover {
+    border-color: var(--ta-accent);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+
+.ta-folder-active {
+    background: color-mix(in srgb, var(--ta-accent) 18%, transparent);
+    border-color: var(--ta-accent);
+    box-shadow: 0 0 0 1px var(--ta-accent) inset;
+}
+
+.ta-folder-icon { color: var(--ta-accent); font-size: 0.95em; }
+
+.ta-folder-name {
+    font-size: 0.9em;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ta-folder-count {
+    font-size: 0.75em;
+    opacity: 0.6;
+    padding: 1px 7px;
+    background: var(--ta-hover);
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+}
+
+.ta-folder-edit {
+    opacity: 0.4;
+    padding: 3px 5px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    font-size: 0.8em;
+}
+
+.ta-folder-edit:hover {
+    opacity: 1;
+    background: var(--ta-hover);
+    color: var(--ta-accent);
+}
+
+/* ============ LIST CONTROLS (stats + sort) ============ */
+.ta-list-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0 8px;
+    opacity: 0.85;
+}
+
+.ta-list-controls #ta_stats {
+    opacity: 0.7;
+    font-size: 0.9em;
+}
+
+.ta-sort-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.75;
+    font-size: 0.85em;
+}
+
+.ta-sort-wrap i { opacity: 0.8; }
+
+.ta-sort-select {
+    background: var(--ta-hover);
+    border: 1px solid var(--ta-border);
+    color: var(--ta-body);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.9em;
+    outline: none;
+    cursor: pointer;
+}
+
+.ta-sort-select:focus { border-color: var(--ta-accent); }
+
+/* ============ THEME ITEM: folder chip ============ */
+.ta-theme-folders {
+    opacity: 0.35;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85em;
+}
+
+.ta-theme-folders:hover {
+    opacity: 1;
+    background: var(--ta-hover);
+    color: var(--ta-accent);
+}
+
+.ta-theme-folders-active {
+    opacity: 0.85;
+    color: var(--ta-accent);
+}
+
+.ta-theme-folders-count {
+    font-size: 0.72em;
+    font-weight: 600;
+    padding: 0 4px;
+    background: color-mix(in srgb, var(--ta-accent) 22%, transparent);
+    border-radius: 8px;
+    min-width: 14px;
+    text-align: center;
+}
+
+/* ============ MINI POPUPS (folder editor / pickers) ============ */
+/* Rendered above the main Theme Manager popup */
+.ta-mini-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: ta-fade 0.15s ease;
+}
+
+.ta-mini-popup {
+    background: var(--ta-bg);
+    border: 1px solid var(--ta-border);
+    border-radius: var(--ta-radius-md);
+    width: 420px;
+    max-width: 90%;
+    max-height: 80%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    animation: ta-pop 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.ta-mini-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--ta-border);
+    font-size: 0.95em;
+    font-weight: 600;
+}
+
+.ta-mini-header i { color: var(--ta-accent); }
+
+.ta-mini-body {
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ta-mini-input { padding-left: 14px !important; }
+
+.ta-mini-hint {
+    font-size: 0.82em;
+    opacity: 0.55;
+    padding: 4px 2px;
+}
+
+.ta-mini-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--ta-border);
+}
+
+.ta-mini-new-folder {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px dashed var(--ta-border);
+}
+
+.ta-mini-new-folder .ta-mini-input { flex: 1; }
+
+.ta-folder-checks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.ta-folder-check-row {
+    padding: 6px 10px;
+    border-radius: var(--ta-radius-sm);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ta-folder-check-row i { color: var(--ta-accent); }
+
+.ta-folder-check-row:hover { background: var(--ta-hover); }
+
+.ta-bulk-row .ta-bulk-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ============ DANGER ============ */
 .ta-btn-danger i { color: #e74c3c; }
 
