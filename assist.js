@@ -3,6 +3,19 @@ const DISPLAY_NAME = 'ThemeAssist';
 const extPath = `scripts/extensions/third-party/${MODULE_NAME}`;
 
 /* ============================================================
+ * UTILS
+ * ============================================================ */
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/* ============================================================
  * SETTINGS STORE
  * ============================================================ */
 function getSettings() {
@@ -99,37 +112,79 @@ jQuery(async () => {
         if (!themeSelect) { console.error(`[${MODULE_NAME}] #themes not found`); return; }
 
         // Auto-confirm native "@import in Custom CSS" dialog (Yes button)
-        const tryAutoConfirm = () => {
-            if (!getSettings().autoConfirmImport) return;
-            // Global search: find any visible Yes button whose popup mentions @import
-            const yesButtons = document.querySelectorAll('.popup-button-ok.result-control, .popup-button-ok');
-            for (const btn of yesButtons) {
-                if (btn.dataset.taAutoClicked) continue;
-                // Check visibility
-                const rect = btn.getBoundingClientRect();
-                if (rect.width === 0 || rect.height === 0) continue;
-                // Walk up to find the popup container and check text
-                let parent = btn.closest('dialog, .popup, .dialogue_popup, .popup-content, body');
-                if (!parent) parent = document.body;
-                const txt = (parent.textContent || '').toLowerCase();
-                if (!txt.includes('@import')) continue;
+        // Narrow, safe implementation: only watches ST popup containers and only
+        // processes actual ST popups that are clearly about @import in Custom CSS.
+        // This prevents interference with other extensions (CSS highlighters,
+        // Notepad-like editors, custom dialogs, etc.).
+        let autoConfirmObserver = null;
 
-                btn.dataset.taAutoClicked = '1';
-                console.log(`[${MODULE_NAME}] Auto-confirming @import dialog`);
-                setTimeout(() => {
-                    btn.click();
-                    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                    btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                }, 80);
+        const isStImportPopup = (popupEl) => {
+            if (!popupEl) return false;
+            const txt = (popupEl.textContent || '').toLowerCase();
+            // Require BOTH markers to avoid false positives on arbitrary CSS
+            // that just happens to contain the substring "@import".
+            return txt.includes('@import') && txt.includes('custom css');
+        };
+
+        const processPopupNode = (popupEl) => {
+            if (!popupEl || popupEl.dataset.taAutoProcessed) return;
+            if (!isStImportPopup(popupEl)) return;
+            const okBtn = popupEl.querySelector('.popup-button-ok');
+            if (!okBtn) return;
+            const rect = okBtn.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            popupEl.dataset.taAutoProcessed = '1';
+            console.log(`[${MODULE_NAME}] Auto-confirming @import dialog`);
+            setTimeout(() => { try { okBtn.click(); } catch (e) { console.warn(e); } }, 80);
+        };
+
+        const scanForImportPopups = (root) => {
+            if (!getSettings().autoConfirmImport) return;
+            // Only ST popup containers — never scan the whole document.
+            const scope = root && root.nodeType === 1 ? root : document;
+            const popups = scope.querySelectorAll
+                ? scope.querySelectorAll('#dialogue_popup, .popup, dialog.popup')
+                : [];
+            popups.forEach(processPopupNode);
+        };
+
+        const startAutoConfirmObserver = () => {
+            if (autoConfirmObserver) return;
+            autoConfirmObserver = new MutationObserver((mutations) => {
+                if (!getSettings().autoConfirmImport) return;
+                for (const m of mutations) {
+                    for (const n of m.addedNodes) {
+                        if (n.nodeType !== 1) continue;
+                        // Only react if the added node itself is/contains a popup.
+                        if (n.matches && n.matches('#dialogue_popup, .popup, dialog.popup')) {
+                            processPopupNode(n);
+                        } else if (n.querySelector) {
+                            const inner = n.querySelector('#dialogue_popup, .popup, dialog.popup');
+                            if (inner) processPopupNode(inner);
+                        }
+                    }
+                }
+            });
+            // childList on body only — no subtree, no characterData.
+            // ST appends popups as direct children of body.
+            autoConfirmObserver.observe(document.body, { childList: true });
+            // One-shot scan on start for any popup already open.
+            scanForImportPopups(document);
+        };
+
+        const stopAutoConfirmObserver = () => {
+            if (autoConfirmObserver) {
+                autoConfirmObserver.disconnect();
+                autoConfirmObserver = null;
             }
         };
 
-        const autoConfirmObserver = new MutationObserver(tryAutoConfirm);
-        autoConfirmObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+        if (getSettings().autoConfirmImport) startAutoConfirmObserver();
 
-        // Also poll every 500ms as a safety net (in case observer misses something)
-        setInterval(tryAutoConfirm, 500);
+        document.addEventListener('ta_auto_import_changed', (e) => {
+            if (e.detail && e.detail.enabled) startAutoConfirmObserver();
+            else stopAutoConfirmObserver();
+        });
 
         // Auto-apply new themes on import
         let knownThemes = new Set(Array.from(themeSelect.options).map(o => o.value));
@@ -181,7 +236,7 @@ function renderFavoritesPanel(themeSelect) {
     for (const fav of favs) {
         const item = $(`
             <div class="ta-fav-item">
-                <span class="ta-fav-name">${fav}</span>
+                <span class="ta-fav-name">${escapeHtml(fav)}</span>
                 <span class="ta-fav-remove" title="Remove"><i class="fa-solid fa-xmark"></i></span>
             </div>
         `);
@@ -269,13 +324,16 @@ function openThemeManager(themeSelect) {
             if (q && !name.toLowerCase().includes(q)) continue;
             const isCurrent = name === currentTheme;
             const isFav = favs.has(name);
+            const safeName = escapeHtml(name);
             const row = $(`
                 <div class="ta-theme-item ${isCurrent ? 'ta-theme-current' : ''}">
-                    <input type="checkbox" class="ta-check" data-theme="${name}">
+                    <input type="checkbox" class="ta-check">
                     <span class="ta-star ${isFav ? 'ta-star-active' : ''}" title="Toggle favorite"></span>
-                    <span class="ta-theme-name">${name}</span>
+                    <span class="ta-theme-name">${safeName}</span>
                 </div>
             `);
+            // Use jQuery .data() to avoid HTML-attr injection on the checkbox
+            row.find('.ta-check').data('theme', name);
             row.find('.ta-star').on('click', (e) => {
                 e.stopPropagation();
                 const nowFav = toggleFavorite(name);
@@ -310,6 +368,8 @@ function openThemeManager(themeSelect) {
     overlay.find('#ta_auto_import').on('change', function () {
         settings.autoConfirmImport = this.checked;
         saveSettings();
+        // Notify main init to start/stop its observer
+        document.dispatchEvent(new CustomEvent('ta_auto_import_changed', { detail: { enabled: this.checked } }));
         toastr.info(`Auto-accept @import: ${this.checked ? 'ON' : 'OFF'}`, DISPLAY_NAME);
     });
     overlay.find('.ta-close-btn').on('click', () => overlay.remove());
@@ -462,7 +522,7 @@ async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
                         <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
                     </div>
                     <div class="ta-popup-body">
-                        <p>Theme <b>"${presetName}"</b> already exists in your library.</p>
+                        <p>Theme <b>"${escapeHtml(presetName)}"</b> already exists in your library.</p>
                         <p style="opacity:0.7">Delete the old one and import the new JSON?</p>
                     </div>
                     <div class="ta-popup-footer">
