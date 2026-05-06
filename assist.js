@@ -674,7 +674,7 @@ function openThemeManager(themeSelect) {
                 </div>
             </div>
         `);
-        overlay.append(editor);
+        $('body').append(editor);
         const $input = editor.find('.ta-mini-input');
         $input.trigger('focus').trigger('select');
         const close = () => editor.remove();
@@ -724,7 +724,7 @@ function openThemeManager(themeSelect) {
                 </div>
             </div>
         `);
-        overlay.append(picker);
+        $('body').append(picker);
         const $checks = picker.find('#ta_folder_checks');
 
         function renderChecks() {
@@ -799,7 +799,7 @@ function openThemeManager(themeSelect) {
                 </div>
             </div>
         `);
-        overlay.append(picker);
+        $('body').append(picker);
         const $checks = picker.find('#ta_bulk_folders');
 
         function draw() {
@@ -903,7 +903,7 @@ function openThemeManager(themeSelect) {
                 </div>
             </div>
         `);
-        overlay.append(dlg);
+        $('body').append(dlg);
         const $input = dlg.find('.ta-mini-input');
         $input.trigger('focus');
         const close = () => dlg.remove();

@@ -396,6 +396,29 @@
     display: block;
 }
 
+/* ============ INTERACTIVE ELEMENTS: mobile tap reliability ============ */
+/* Disable the 300ms click delay and double-tap zoom on iOS so taps on
+   buttons, folder cards and close icons register immediately. */
+#ta_popup_overlay .ta-btn,
+#ta_popup_overlay .ta-close-btn,
+#ta_popup_overlay .ta-folder-card,
+#ta_popup_overlay .ta-folder-edit,
+#ta_popup_overlay .ta-star,
+#ta_popup_overlay .ta-theme-folders,
+#ta_popup_overlay .ta-theme-name,
+#ta_popup_overlay .ta-fav-name,
+#ta_popup_overlay .ta-fav-remove,
+#ta_popup_overlay .ta-check-label,
+.ta-mini-overlay .ta-btn,
+.ta-mini-overlay .ta-close-btn,
+.ta-mini-overlay .ta-folder-check-row,
+.ta-mini-overlay label,
+#ta_block .ta-btn,
+#ta_block .ta-inline-header,
+#ta_block .ta-fav-item {
+    touch-action: manipulation;
+}
+
 /* ============ FOLDERS ============ */
 .ta-folders-wrap {
     margin: 4px 0 12px;
