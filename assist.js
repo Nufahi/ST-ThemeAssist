@@ -496,10 +496,9 @@ function openThemeManager(themeSelect) {
                                 </div>
                             </div>
                         </div>
-                        <div id="ta_folders_list" class="ta-folders-list"></div>
-                        <div class="ta-folder-create-row" id="ta_folder_create_row" hidden>
+                        <div class="ta-folder-create-row" id="ta_folder_create_row" style="display:none">
                             <i class="fa-solid fa-folder"></i>
-                            <input type="text" class="ta-search-input ta-mini-input" id="ta_new_folder_input"
+                            <input type="text" class="ta-search-input" id="ta_new_folder_input"
                                    placeholder="New folder name..." maxlength="64">
                             <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_confirm" title="Create folder">
                                 <i class="fa-solid fa-check"></i>
@@ -508,6 +507,7 @@ function openThemeManager(themeSelect) {
                                 <i class="fa-solid fa-xmark"></i>
                             </div>
                         </div>
+                        <div id="ta_folders_list" class="ta-folders-list"></div>
                     </div>
                     <div class="ta-list-controls">
                         <span id="ta_stats">${allThemes.length} themes · ${favs.size} favorites</span>
@@ -924,14 +924,24 @@ function openThemeManager(themeSelect) {
     const $createInput = overlay.find('#ta_new_folder_input');
 
     function openFolderCreateRow() {
-        $createRow.removeAttr('hidden');
+        // Use explicit inline display so no CSS rule can hide it (the HTML
+        // [hidden] attribute loses to .ta-folder-create-row { display:flex }
+        // at equal specificity, which previously made the row appear to
+        // "not open" on some layouts).
+        $createRow.css('display', 'flex');
         $createInput.val('');
+        // Scroll the row into view in case the body was scrolled and the
+        // inline row sits outside the visible area (especially on mobile,
+        // where the popup body is short and the folder list can be long).
+        try {
+            $createRow[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (_) { /* older browsers */ }
         // Small delay so iOS reliably opens the keyboard after tap.
-        setTimeout(() => { try { $createInput.trigger('focus'); } catch (_) {} }, 30);
+        setTimeout(() => { try { $createInput.trigger('focus'); } catch (_) {} }, 80);
     }
 
     function closeFolderCreateRow() {
-        $createRow.attr('hidden', 'hidden');
+        $createRow.css('display', 'none');
         $createInput.val('');
     }
 
@@ -944,9 +954,9 @@ function openThemeManager(themeSelect) {
     }
 
     overlay.find('#ta_new_folder_btn').on('click', () => {
-        // Toggle: if it's already open, just refocus the input.
-        if ($createRow.is('[hidden]')) openFolderCreateRow();
-        else $createInput.trigger('focus');
+        // Toggle: if already open, just refocus the input.
+        if ($createRow.is(':visible')) $createInput.trigger('focus');
+        else openFolderCreateRow();
     });
     overlay.find('#ta_folder_create_confirm').on('click', confirmFolderCreate);
     overlay.find('#ta_folder_create_cancel').on('click', closeFolderCreateRow);
