@@ -325,6 +325,9 @@ function openThemeManager(themeSelect) {
                 <div class="ta-popup-footer">
                     <div id="ta_selected_count" class="ta-bulk-controls-info">0 selected</div>
                     <div class="ta-footer-buttons">
+                        <div class="menu_button ta-btn" id="ta_export_btn" title="Export selected themes (zip if multiple)">
+                            <i class="fa-solid fa-file-export"></i>&nbsp;Export
+                        </div>
                         <div class="menu_button ta-btn ta-btn-danger" id="ta_delete_btn">
                             <i class="fa-solid fa-trash"></i>&nbsp;Delete
                         </div>
@@ -404,7 +407,13 @@ function openThemeManager(themeSelect) {
     overlay.find('.ta-close-btn').on('click', () => overlay.remove());
     overlay.on('click', (e) => { if (e.target === overlay[0]) overlay.remove(); });
 
-        overlay.find('#ta_delete_btn').on('click', async () => {
+    overlay.find('#ta_export_btn').on('click', async () => {
+        const sel = overlay.find('.ta-check:checked').map((_, el) => $(el).data('theme')).get();
+        if (sel.length === 0) { toastr.warning('Select themes to export', DISPLAY_NAME); return; }
+        await bulkExportThemes(sel);
+    });
+
+    overlay.find('#ta_delete_btn').on('click', async () => {
         const sel = overlay.find('.ta-check:checked').map((_, el) => $(el).data('theme')).get();
         if (sel.length === 0) { toastr.warning('Select themes to delete', DISPLAY_NAME); return; }
         const skip = $skipConfirm.prop('checked');
@@ -417,7 +426,7 @@ function openThemeManager(themeSelect) {
 }
 
 /* ============================================================
- * ZIP LIB LOADER (for Smart Import)
+ * ZIP LIB LOADER (for Smart Import / Export)
  * ============================================================ */
 async function loadJSZip() {
     if (window.JSZip) return window.JSZip;
@@ -428,6 +437,130 @@ async function loadJSZip() {
         s.onerror = () => reject(new Error('JSZip load failed'));
         document.head.appendChild(s);
     });
+}
+
+/* ============================================================
+ * EXPORT THEMES
+ * ============================================================ */
+
+/**
+ * Fetches the full theme objects from ST's server.
+ * /api/settings/get returns ALL user settings including the themes array.
+ * @returns {Promise<Array<object>>} Array of theme objects, or [] on failure.
+ */
+async function fetchAllThemes() {
+    try {
+        const ctx = SillyTavern.getContext();
+        const headers = (typeof ctx.getRequestHeaders === 'function')
+            ? ctx.getRequestHeaders()
+            : { 'Content-Type': 'application/json' };
+        const res = await fetch('/api/settings/get', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({}),
+            cache: 'no-cache',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return Array.isArray(data.themes) ? data.themes : [];
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] fetchAllThemes failed:`, err);
+        toastr.error('Failed to fetch themes from server', DISPLAY_NAME);
+        return [];
+    }
+}
+
+/** Safe filename from theme name. */
+function themeFileName(name) {
+    return String(name || 'theme')
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 200) || 'theme';
+}
+
+/** Triggers a browser download of a Blob. */
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+/**
+ * Exports selected themes:
+ *  - 1 theme  → single .json file
+ *  - 2+ themes → a zip archive
+ * @param {string[]} names Theme names to export.
+ */
+async function bulkExportThemes(names) {
+    if (!Array.isArray(names) || names.length === 0) {
+        toastr.warning('Nothing to export', DISPLAY_NAME);
+        return;
+    }
+
+    toastr.info(`Preparing export of ${names.length} theme(s)...`, DISPLAY_NAME);
+    const allThemes = await fetchAllThemes();
+    if (allThemes.length === 0) return;
+
+    const byName = new Map(allThemes.map(t => [t.name, t]));
+    const found = [];
+    const missing = [];
+    for (const n of names) {
+        if (byName.has(n)) found.push(byName.get(n));
+        else missing.push(n);
+    }
+
+    if (found.length === 0) {
+        toastr.error('Selected themes not found on server', DISPLAY_NAME);
+        return;
+    }
+
+    try {
+        if (found.length === 1) {
+            const theme = found[0];
+            const blob = new Blob([JSON.stringify(theme, null, 4)], { type: 'application/json' });
+            downloadBlob(blob, `${themeFileName(theme.name)}.json`);
+        } else {
+            const JSZip = await loadJSZip();
+            const zip = new JSZip();
+            const usedNames = new Set();
+            for (const theme of found) {
+                // Make sure filenames inside the zip are unique even if two
+                // themes share a sanitized name.
+                let base = themeFileName(theme.name);
+                let fname = `${base}.json`;
+                let i = 2;
+                while (usedNames.has(fname)) {
+                    fname = `${base} (${i++}).json`;
+                }
+                usedNames.add(fname);
+                zip.file(fname, JSON.stringify(theme, null, 4));
+            }
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 },
+            });
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            downloadBlob(blob, `themes-export-${stamp}.zip`);
+        }
+
+        const missed = missing.length ? `, ${missing.length} missing` : '';
+        toastr.success(`Exported ${found.length} theme(s)${missed}`, DISPLAY_NAME);
+        if (missing.length) {
+            console.warn(`[${MODULE_NAME}] Missing themes:`, missing);
+        }
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] Export failed:`, err);
+        toastr.error('Export failed — see console', DISPLAY_NAME);
+    }
 }
 
 async function bulkDeleteThemes(names, themeSelect, skipConfirm) {
