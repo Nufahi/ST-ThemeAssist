@@ -111,18 +111,29 @@ jQuery(async () => {
 
         if (!themeSelect) { console.error(`[${MODULE_NAME}] #themes not found`); return; }
 
-        // Auto-confirm native "@import in Custom CSS" dialog (Yes button)
-        // Narrow, safe implementation: only watches ST popup containers and only
-        // processes actual ST popups that are clearly about @import in Custom CSS.
-        // This prevents interference with other extensions (CSS highlighters,
-        // Notepad-like editors, custom dialogs, etc.).
+        // Auto-confirm native "@import in Custom CSS" dialog (Yes button).
+        //
+        // Strategy: watch the whole body subtree for added nodes, but react ONLY
+        // when a real ST popup appears whose text contains both "@import" and
+        // "Custom CSS" — the exact phrasing of the template (see ST's
+        // public/scripts/templates/themeImportWarning.html). This is strict
+        // enough to never interfere with other extensions (CSS highlighters,
+        // custom editors, etc.) and loose enough to always catch the real
+        // warning, regardless of whether the popup node is inserted into body
+        // directly or into a nested container.
         let autoConfirmObserver = null;
+
+        // ST popup selectors (Popup.js uses <dialog class="popup">, older
+        // callPopup uses #dialogue_popup). Limit matches to these containers
+        // only — never generic classes that other extensions could reuse.
+        const ST_POPUP_SEL = 'dialog.popup, #dialogue_popup';
 
         const isStImportPopup = (popupEl) => {
             if (!popupEl) return false;
             const txt = (popupEl.textContent || '').toLowerCase();
-            // Require BOTH markers to avoid false positives on arbitrary CSS
-            // that just happens to contain the substring "@import".
+            // Require BOTH markers. Real warning contains both; a theme CSS
+            // that coincidentally mentions "@import" in an unrelated UI
+            // element will not match because "custom css" won't be present.
             return txt.includes('@import') && txt.includes('custom css');
         };
 
@@ -138,14 +149,28 @@ jQuery(async () => {
             setTimeout(() => { try { okBtn.click(); } catch (e) { console.warn(e); } }, 80);
         };
 
+        // Retry a popup a few times — ST sometimes inserts the popup node
+        // first and fills its text asynchronously, so textContent may be
+        // empty on the first mutation. Retries are cheap and stop as soon
+        // as the node is processed or proven unrelated.
+        const retryProcessPopup = (popupEl) => {
+            if (!popupEl || popupEl.dataset.taAutoProcessed) return;
+            let attempts = 0;
+            const tick = () => {
+                if (!popupEl.isConnected) return;
+                if (popupEl.dataset.taAutoProcessed) return;
+                processPopupNode(popupEl);
+                if (popupEl.dataset.taAutoProcessed) return;
+                if (++attempts < 10) setTimeout(tick, 60);
+            };
+            tick();
+        };
+
         const scanForImportPopups = (root) => {
             if (!getSettings().autoConfirmImport) return;
-            // Only ST popup containers — never scan the whole document.
             const scope = root && root.nodeType === 1 ? root : document;
-            const popups = scope.querySelectorAll
-                ? scope.querySelectorAll('#dialogue_popup, .popup, dialog.popup')
-                : [];
-            popups.forEach(processPopupNode);
+            if (!scope.querySelectorAll) return;
+            scope.querySelectorAll(ST_POPUP_SEL).forEach(retryProcessPopup);
         };
 
         const startAutoConfirmObserver = () => {
@@ -155,19 +180,23 @@ jQuery(async () => {
                 for (const m of mutations) {
                     for (const n of m.addedNodes) {
                         if (n.nodeType !== 1) continue;
-                        // Only react if the added node itself is/contains a popup.
-                        if (n.matches && n.matches('#dialogue_popup, .popup, dialog.popup')) {
-                            processPopupNode(n);
-                        } else if (n.querySelector) {
-                            const inner = n.querySelector('#dialogue_popup, .popup, dialog.popup');
-                            if (inner) processPopupNode(inner);
+                        // Check the node itself…
+                        if (n.matches && n.matches(ST_POPUP_SEL)) {
+                            retryProcessPopup(n);
+                            continue;
+                        }
+                        // …or any popups inside it (in case of nested insert).
+                        if (n.querySelectorAll) {
+                            const inner = n.querySelectorAll(ST_POPUP_SEL);
+                            if (inner.length) inner.forEach(retryProcessPopup);
                         }
                     }
                 }
             });
-            // childList on body only — no subtree, no characterData.
-            // ST appends popups as direct children of body.
-            autoConfirmObserver.observe(document.body, { childList: true });
+            // Subtree is required: ST may fill popup content asynchronously,
+            // so we need to see insertions deep in the popup structure too.
+            // This is safe because we filter strictly by ST_POPUP_SEL.
+            autoConfirmObserver.observe(document.body, { childList: true, subtree: true });
             // One-shot scan on start for any popup already open.
             scanForImportPopups(document);
         };
