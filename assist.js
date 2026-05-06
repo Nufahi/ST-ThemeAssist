@@ -133,14 +133,30 @@ function foldersOfTheme(themeName) {
  * NATIVE THEME ACTIONS (via ST's own buttons)
  * ============================================================ */
 function applyThemeByName(themeSelect, name) {
-    themeSelect.value = name;
-    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    if ($(themeSelect).hasClass('select2-hidden-accessible')) {
-        $(themeSelect).val(name).trigger('change.select2');
-    } else {
-        $(themeSelect).trigger('change');
+    if (!themeSelect || !name) return;
+    // Verify the option actually exists before triggering change, otherwise
+    // ST's applyTheme() will no-op silently but we'll have left the select
+    // in an invalid state.
+    const hasOption = Array.from(themeSelect.options).some(o => o.value === name);
+    if (!hasOption) {
+        console.warn(`[${MODULE_NAME}] applyThemeByName: option "${name}" not found in #themes`);
+        return;
     }
-    $('#ta_last_applied').text(name);
+    // Fire ONE change event. Dispatching both a native Event and a jQuery
+    // .trigger('change') used to cause ST's handler to run twice, which
+    // could race with @import confirmation popups and other async work
+    // during theme initialization.
+    if ($(themeSelect).hasClass('select2-hidden-accessible')) {
+        // select2-managed selects: setting .val + 'change' triggers both
+        // select2 internal update and ST's handler.
+        $(themeSelect).val(name).trigger('change');
+    } else {
+        themeSelect.value = name;
+        themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    // The inline block may not be mounted yet during very early init.
+    const lastApplied = document.getElementById('ta_last_applied');
+    if (lastApplied) lastApplied.textContent = name;
 }
 
 
@@ -210,6 +226,11 @@ jQuery(async () => {
         // warning, regardless of whether the popup node is inserted into body
         // directly or into a nested container.
         let autoConfirmObserver = null;
+        // Don't auto-confirm anything during initial page load — wait until
+        // ST finished setting up. This avoids racing with any theme-loading
+        // UI that might momentarily look like our target popup.
+        let autoConfirmArmed = false;
+        setTimeout(() => { autoConfirmArmed = true; }, 2500);
 
         // ST popup selectors (Popup.js uses <dialog class="popup">, older
         // callPopup uses #dialogue_popup). Limit matches to these containers
@@ -218,23 +239,38 @@ jQuery(async () => {
 
         const isStImportPopup = (popupEl) => {
             if (!popupEl) return false;
+            // The real warning uses this exact phrasing from ST's template:
+            // "This theme contains @import lines in the Custom CSS.
+            //  Press \"Yes\" to proceed."
+            // Match on the full phrase rather than loose substrings so we
+            // never trip on an arbitrary popup that happens to quote CSS.
             const txt = (popupEl.textContent || '').toLowerCase();
-            // Require BOTH markers. Real warning contains both; a theme CSS
-            // that coincidentally mentions "@import" in an unrelated UI
-            // element will not match because "custom css" won't be present.
-            return txt.includes('@import') && txt.includes('custom css');
+            return txt.includes('@import lines in the custom css');
         };
 
         const processPopupNode = (popupEl) => {
+            if (!autoConfirmArmed) return;
             if (!popupEl || popupEl.dataset.taAutoProcessed) return;
             if (!isStImportPopup(popupEl)) return;
+            // The popup must be actually open and visible. ST marks closed
+            // popups with various attributes; easiest check is layout box.
+            const popupRect = popupEl.getBoundingClientRect();
+            if (popupRect.width === 0 || popupRect.height === 0) return;
             const okBtn = popupEl.querySelector('.popup-button-ok');
             if (!okBtn) return;
             const rect = okBtn.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) return;
             popupEl.dataset.taAutoProcessed = '1';
             console.log(`[${MODULE_NAME}] Auto-confirming @import dialog`);
-            setTimeout(() => { try { okBtn.click(); } catch (e) { console.warn(e); } }, 80);
+            setTimeout(() => {
+                try {
+                    // Double-check at click time — the popup may have been
+                    // closed by the user in the meantime.
+                    if (!popupEl.isConnected) return;
+                    if (okBtn.getBoundingClientRect().width === 0) return;
+                    okBtn.click();
+                } catch (e) { console.warn(e); }
+            }, 80);
         };
 
         // Retry a popup a few times — ST sometimes inserts the popup node
@@ -303,21 +339,64 @@ jQuery(async () => {
             else stopAutoConfirmObserver();
         });
 
-        // Auto-apply new themes on import
+        // Auto-apply new themes on import.
+        //
+        // We must be careful here: ST may re-populate #themes during page
+        // loading or on settings refresh (e.g. remove old <option>s then
+        // add them back). If we treat every addition as an "import" we
+        // will apply themes in a loop and can break ST's own
+        // initialization, causing a crash that only a reload fixes.
+        //
+        // Safeguards:
+        //  1. A "settled" flag — we ignore all mutations for the first few
+        //     seconds after init, long enough for ST to finish populating.
+        //  2. Anti-flood — never auto-apply more than one theme per
+        //     observer callback, and never more often than every 500ms.
+        //  3. Skip if the added <option> was added as part of a
+        //     removed+added pair in the same mutation batch (that's a
+        //     re-render, not an import).
         let knownThemes = new Set(Array.from(themeSelect.options).map(o => o.value));
+        let autoApplyArmed = false;
+        setTimeout(() => { autoApplyArmed = true; }, 4000);
+        let lastApplyAt = 0;
+
         const observer = new MutationObserver((mutations) => {
+            // Collect all removals/additions across the batch first so we
+            // can detect "swap" patterns (remove X then re-add X).
+            const removedInBatch = new Set();
+            const addedInBatch = [];
             for (const m of mutations) {
                 for (const n of m.removedNodes) {
-                    if (n.tagName === 'OPTION' && knownThemes.has(n.value)) knownThemes.delete(n.value);
-                }
-                for (const n of m.addedNodes) {
-                    if (n.tagName === 'OPTION' && !knownThemes.has(n.value)) {
-                        const name = n.value;
-                        applyThemeByName(themeSelect, name);
-                        knownThemes.add(name);
-                        toastr.success(`Applied: "${name}"`, DISPLAY_NAME);
+                    if (n.tagName === 'OPTION' && n.value) {
+                        removedInBatch.add(n.value);
+                        knownThemes.delete(n.value);
                     }
                 }
+                for (const n of m.addedNodes) {
+                    if (n.tagName === 'OPTION' && n.value) addedInBatch.push(n.value);
+                }
+            }
+            // Update knownThemes for everything we saw added.
+            for (const name of addedInBatch) knownThemes.add(name);
+            if (!autoApplyArmed) return;
+
+            // Only pick truly-new additions: not seen before AND not a
+            // simultaneous re-add of something we just "lost".
+            const trulyNew = addedInBatch.filter(n => !removedInBatch.has(n));
+            if (trulyNew.length === 0) return;
+
+            // Anti-flood: apply at most one theme, and not more often than
+            // once per 500ms.
+            const now = Date.now();
+            if (now - lastApplyAt < 500) return;
+            lastApplyAt = now;
+
+            const name = trulyNew[0];
+            try {
+                applyThemeByName(themeSelect, name);
+                toastr.success(`Applied: "${name}"`, DISPLAY_NAME);
+            } catch (err) {
+                console.error(`[${MODULE_NAME}] Auto-apply failed:`, err);
             }
         });
         observer.observe(themeSelect, { childList: true });
