@@ -497,6 +497,17 @@ function openThemeManager(themeSelect) {
                             </div>
                         </div>
                         <div id="ta_folders_list" class="ta-folders-list"></div>
+                        <div class="ta-folder-create-row" id="ta_folder_create_row" hidden>
+                            <i class="fa-solid fa-folder"></i>
+                            <input type="text" class="ta-search-input ta-mini-input" id="ta_new_folder_input"
+                                   placeholder="New folder name..." maxlength="64">
+                            <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_confirm" title="Create folder">
+                                <i class="fa-solid fa-check"></i>
+                            </div>
+                            <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_cancel" title="Cancel">
+                                <i class="fa-solid fa-xmark"></i>
+                            </div>
+                        </div>
                     </div>
                     <div class="ta-list-controls">
                         <span id="ta_stats">${allThemes.length} themes · ${favs.size} favorites</span>
@@ -652,33 +663,39 @@ function openThemeManager(themeSelect) {
         $selectedCount.text(`${overlay.find('.ta-check:checked').length} selected`);
     }
 
-    /* ---------- Folder editor (rename / delete) ---------- */
+    /* ---------- Folder editor (rename / delete) ----------
+       Uses the same overlay+popup structure as the main Theme Manager so
+       it behaves identically on mobile. Appended to <body> so it sits in
+       its own stacking context above the main manager. */
     function openFolderEditor(folderId) {
         const f = getFolderById(folderId);
         if (!f) return;
         const editor = $(`
-            <div class="ta-mini-overlay">
-                <div class="ta-mini-popup">
-                    <div class="ta-mini-header">
-                        <span><i class="fa-solid fa-folder"></i>&nbsp;Edit folder</span>
+            <div class="ta-popup-overlay-extra">
+                <div class="ta-popup" style="width:440px">
+                    <div class="ta-popup-header">
+                        <h3><i class="fa-solid fa-folder"></i> Edit folder</h3>
                         <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
                     </div>
-                    <div class="ta-mini-body">
-                        <input type="text" class="ta-search-input ta-mini-input" maxlength="64" value="${escapeHtml(f.name)}">
-                        <div class="ta-mini-hint">${f.themes.length} theme(s) in this folder</div>
+                    <div class="ta-popup-body">
+                        <input type="text" class="ta-search-input" maxlength="64" value="${escapeHtml(f.name)}" style="padding-left:14px">
+                        <p style="opacity:0.65;margin-top:10px">${f.themes.length} theme(s) in this folder.</p>
                     </div>
-                    <div class="ta-mini-footer">
+                    <div class="ta-popup-footer">
                         <div class="menu_button ta-btn ta-btn-danger" data-act="del"><i class="fa-solid fa-trash"></i>&nbsp;Delete</div>
-                        <div class="menu_button ta-btn" data-act="save"><i class="fa-solid fa-check"></i>&nbsp;Save</div>
+                        <div class="ta-footer-buttons">
+                            <div class="menu_button ta-btn" data-act="cancel"><i class="fa-solid fa-ban"></i>&nbsp;Cancel</div>
+                            <div class="menu_button ta-btn" data-act="save"><i class="fa-solid fa-check"></i>&nbsp;Save</div>
+                        </div>
                     </div>
                 </div>
             </div>
         `);
         $('body').append(editor);
-        const $input = editor.find('.ta-mini-input');
-        $input.trigger('focus').trigger('select');
+        const $input = editor.find('input[type=text]');
+        setTimeout(() => { try { $input.trigger('focus').trigger('select'); } catch (_) {} }, 30);
         const close = () => editor.remove();
-        editor.find('.ta-close-btn').on('click', close);
+        editor.find('.ta-close-btn, [data-act=cancel]').on('click', close);
         editor.on('click', (e) => { if (e.target === editor[0]) close(); });
         editor.find('[data-act=save]').on('click', () => {
             const newName = $input.val().trim();
@@ -697,29 +714,35 @@ function openThemeManager(themeSelect) {
             renderList();
         });
         $input.on('keydown', (e) => {
-            if (e.key === 'Enter') editor.find('[data-act=save]').trigger('click');
-            if (e.key === 'Escape') close();
+            if (e.key === 'Enter') { e.preventDefault(); editor.find('[data-act=save]').trigger('click'); }
+            if (e.key === 'Escape') { e.preventDefault(); close(); }
         });
     }
 
     /* ---------- Theme ↔ folders picker ---------- */
     function openThemeFolderPicker(themeName) {
         const picker = $(`
-            <div class="ta-mini-overlay">
-                <div class="ta-mini-popup">
-                    <div class="ta-mini-header">
-                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;Folders for "${escapeHtml(themeName)}"</span>
+            <div class="ta-popup-overlay-extra">
+                <div class="ta-popup" style="width:440px">
+                    <div class="ta-popup-header">
+                        <h3><i class="fa-solid fa-folder-plus"></i> Folders for "${escapeHtml(themeName)}"</h3>
                         <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
                     </div>
-                    <div class="ta-mini-body">
+                    <div class="ta-popup-body">
                         <div class="ta-folder-checks" id="ta_folder_checks"></div>
-                        <div class="ta-mini-new-folder">
-                            <input type="text" class="ta-search-input ta-mini-input" placeholder="New folder name..." maxlength="64">
-                            <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-plus"></i></div>
+                        <div class="ta-folder-create-row" style="margin-top:12px">
+                            <i class="fa-solid fa-folder"></i>
+                            <input type="text" class="ta-search-input" placeholder="New folder name..." maxlength="64">
+                            <div class="menu_button ta-btn ta-btn-small" data-act="create" title="Create folder">
+                                <i class="fa-solid fa-plus"></i>
+                            </div>
                         </div>
                     </div>
-                    <div class="ta-mini-footer">
-                        <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                    <div class="ta-popup-footer">
+                        <div></div>
+                        <div class="ta-footer-buttons">
+                            <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -731,7 +754,7 @@ function openThemeManager(themeSelect) {
             $checks.empty();
             const folders = [...getFolders()].sort((a, b) => a.name.localeCompare(b.name));
             if (folders.length === 0) {
-                $checks.html('<div class="ta-mini-hint">No folders yet. Create one below.</div>');
+                $checks.html('<div class="ta-folders-empty">No folders yet. Create one below.</div>');
                 return;
             }
             const inIds = new Set(foldersOfTheme(themeName));
@@ -764,7 +787,7 @@ function openThemeManager(themeSelect) {
         picker.on('click', (e) => { if (e.target === picker[0]) close(); });
 
         picker.find('[data-act=create]').on('click', () => {
-            const $input = picker.find('.ta-mini-input');
+            const $input = picker.find('.ta-folder-create-row input[type=text]');
             const name = $input.val().trim();
             if (!name) return;
             const f = createFolder(name);
@@ -772,29 +795,35 @@ function openThemeManager(themeSelect) {
             $input.val('');
             renderChecks();
         });
-        picker.find('.ta-mini-input').on('keydown', (e) => {
-            if (e.key === 'Enter') picker.find('[data-act=create]').trigger('click');
+        picker.find('.ta-folder-create-row input[type=text]').on('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); picker.find('[data-act=create]').trigger('click'); }
         });
     }
 
     /* ---------- Bulk: add selected themes to folder ---------- */
     function openBulkAddToFolder(themeNames) {
         const picker = $(`
-            <div class="ta-mini-overlay">
-                <div class="ta-mini-popup">
-                    <div class="ta-mini-header">
-                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;Add ${themeNames.length} theme(s) to folder</span>
+            <div class="ta-popup-overlay-extra">
+                <div class="ta-popup" style="width:440px">
+                    <div class="ta-popup-header">
+                        <h3><i class="fa-solid fa-folder-plus"></i> Add ${themeNames.length} theme(s) to folder</h3>
                         <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
                     </div>
-                    <div class="ta-mini-body">
+                    <div class="ta-popup-body">
                         <div class="ta-folder-checks" id="ta_bulk_folders"></div>
-                        <div class="ta-mini-new-folder">
-                            <input type="text" class="ta-search-input ta-mini-input" placeholder="New folder name..." maxlength="64">
-                            <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-plus"></i></div>
+                        <div class="ta-folder-create-row" style="margin-top:12px">
+                            <i class="fa-solid fa-folder"></i>
+                            <input type="text" class="ta-search-input" placeholder="New folder name..." maxlength="64">
+                            <div class="menu_button ta-btn ta-btn-small" data-act="create" title="Create folder">
+                                <i class="fa-solid fa-plus"></i>
+                            </div>
                         </div>
                     </div>
-                    <div class="ta-mini-footer">
-                        <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                    <div class="ta-popup-footer">
+                        <div></div>
+                        <div class="ta-footer-buttons">
+                            <div class="menu_button ta-btn" data-act="done"><i class="fa-solid fa-check"></i>&nbsp;Done</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -806,7 +835,7 @@ function openThemeManager(themeSelect) {
             $checks.empty();
             const folders = [...getFolders()].sort((a, b) => a.name.localeCompare(b.name));
             if (folders.length === 0) {
-                $checks.html('<div class="ta-mini-hint">No folders yet. Create one below.</div>');
+                $checks.html('<div class="ta-folders-empty">No folders yet. Create one below.</div>');
                 return;
             }
             for (const f of folders) {
@@ -833,7 +862,7 @@ function openThemeManager(themeSelect) {
         picker.on('click', (e) => { if (e.target === picker[0]) close(); });
 
         picker.find('[data-act=create]').on('click', () => {
-            const $input = picker.find('.ta-mini-input');
+            const $input = picker.find('.ta-folder-create-row input[type=text]');
             const name = $input.val().trim();
             if (!name) return;
             const f = createFolder(name);
@@ -841,8 +870,8 @@ function openThemeManager(themeSelect) {
             $input.val('');
             draw();
         });
-        picker.find('.ta-mini-input').on('keydown', (e) => {
-            if (e.key === 'Enter') picker.find('[data-act=create]').trigger('click');
+        picker.find('.ta-folder-create-row input[type=text]').on('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); picker.find('[data-act=create]').trigger('click'); }
         });
     }
 
@@ -886,41 +915,44 @@ function openThemeManager(themeSelect) {
         await bulkDeleteThemes(sel, themeSelect, skip);
     });
 
+    /* ---------- Inline folder creation ----------
+       We use an inline row under the folder list instead of a mini-popup
+       because mini popups become unreliable on mobile when the main
+       Theme Manager uses backdrop-filter. Inline is simpler and works
+       everywhere. */
+    const $createRow = overlay.find('#ta_folder_create_row');
+    const $createInput = overlay.find('#ta_new_folder_input');
+
+    function openFolderCreateRow() {
+        $createRow.removeAttr('hidden');
+        $createInput.val('');
+        // Small delay so iOS reliably opens the keyboard after tap.
+        setTimeout(() => { try { $createInput.trigger('focus'); } catch (_) {} }, 30);
+    }
+
+    function closeFolderCreateRow() {
+        $createRow.attr('hidden', 'hidden');
+        $createInput.val('');
+    }
+
+    function confirmFolderCreate() {
+        const name = $createInput.val().trim();
+        if (!name) { toastr.warning('Name cannot be empty', DISPLAY_NAME); return; }
+        createFolder(name);
+        closeFolderCreateRow();
+        renderFolders();
+    }
+
     overlay.find('#ta_new_folder_btn').on('click', () => {
-        const dlg = $(`
-            <div class="ta-mini-overlay">
-                <div class="ta-mini-popup" style="width:360px">
-                    <div class="ta-mini-header">
-                        <span><i class="fa-solid fa-folder-plus"></i>&nbsp;New folder</span>
-                        <span class="ta-close-btn"><i class="fa-solid fa-xmark"></i></span>
-                    </div>
-                    <div class="ta-mini-body">
-                        <input type="text" class="ta-search-input ta-mini-input" placeholder="Folder name..." maxlength="64">
-                    </div>
-                    <div class="ta-mini-footer">
-                        <div class="menu_button ta-btn" data-act="create"><i class="fa-solid fa-check"></i>&nbsp;Create</div>
-                    </div>
-                </div>
-            </div>
-        `);
-        $('body').append(dlg);
-        const $input = dlg.find('.ta-mini-input');
-        $input.trigger('focus');
-        const close = () => dlg.remove();
-        dlg.find('.ta-close-btn').on('click', close);
-        dlg.on('click', (e) => { if (e.target === dlg[0]) close(); });
-        const create = () => {
-            const name = $input.val().trim();
-            if (!name) { toastr.warning('Name cannot be empty', DISPLAY_NAME); return; }
-            createFolder(name);
-            close();
-            renderFolders();
-        };
-        dlg.find('[data-act=create]').on('click', create);
-        $input.on('keydown', (e) => {
-            if (e.key === 'Enter') create();
-            if (e.key === 'Escape') close();
-        });
+        // Toggle: if it's already open, just refocus the input.
+        if ($createRow.is('[hidden]')) openFolderCreateRow();
+        else $createInput.trigger('focus');
+    });
+    overlay.find('#ta_folder_create_confirm').on('click', confirmFolderCreate);
+    overlay.find('#ta_folder_create_cancel').on('click', closeFolderCreateRow);
+    $createInput.on('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); confirmFolderCreate(); }
+        if (e.key === 'Escape') { e.preventDefault(); closeFolderCreateRow(); }
     });
 
     $sortMode.on('change', () => {

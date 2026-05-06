@@ -409,10 +409,10 @@
 #ta_popup_overlay .ta-fav-name,
 #ta_popup_overlay .ta-fav-remove,
 #ta_popup_overlay .ta-check-label,
-.ta-mini-overlay .ta-btn,
-.ta-mini-overlay .ta-close-btn,
-.ta-mini-overlay .ta-folder-check-row,
-.ta-mini-overlay label,
+.ta-popup-overlay-extra .ta-btn,
+.ta-popup-overlay-extra .ta-close-btn,
+.ta-popup-overlay-extra .ta-folder-check-row,
+.ta-popup-overlay-extra label,
 #ta_block .ta-btn,
 #ta_block .ta-inline-header,
 #ta_block .ta-fav-item {
@@ -604,8 +604,55 @@
     text-align: center;
 }
 
-/* ============ MINI POPUPS (folder editor / pickers) ============ */
-/* Rendered above the main Theme Manager popup */
+/* ============ SECONDARY POPUP (folder editor / pickers) ============
+   Uses the same structure and classes (.ta-popup-*) as the main Theme
+   Manager. Rendered above it via z-index. Kept intentionally identical
+   so mobile layout is inherited from the already-working main popup. */
+.ta-popup-overlay-extra {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: ta-fade 0.18s ease;
+}
+
+/* Inline folder creation row (used in the main Folders section and in
+   the folder pickers). Simple, single-line, no fancy stacking. */
+.ta-folder-create-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: var(--ta-radius-sm);
+    border: 1px dashed var(--ta-border);
+    background: var(--ta-bg);
+}
+
+.ta-folder-create-row > i {
+    color: var(--ta-accent);
+    font-size: 0.95em;
+    flex-shrink: 0;
+}
+
+.ta-folder-create-row input[type=text] {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 10px !important;
+    font-size: 0.9em;
+    border-radius: var(--ta-radius-sm);
+}
+
+.ta-folder-create-row .ta-btn {
+    flex-shrink: 0;
+}
+
+/* legacy shim: a few places may still use .ta-mini-* — keep these
+   classes working harmlessly in case future code reuses them. */
 .ta-mini-overlay {
     position: fixed;
     inset: 0;
@@ -751,7 +798,8 @@
         font-size: 13px;
     }
 
-    #ta_popup_overlay .ta-popup {
+    #ta_popup_overlay .ta-popup,
+    .ta-popup-overlay-extra .ta-popup {
         width: 95vw !important;
         max-width: 95vw !important;
         max-height: 90vh;
@@ -869,12 +917,18 @@
         font-size: 14px;
     }
 
-    #ta_popup_overlay .ta-popup {
+    #ta_popup_overlay .ta-popup,
+    .ta-popup-overlay-extra .ta-popup {
         width: 100vw !important;
         max-width: 100vw !important;
         max-height: 95vh;
         border-radius: 8px 8px 0 0;
         margin-top: auto;
+    }
+
+    /* On phones the extra popup docks to the bottom like the main one */
+    .ta-popup-overlay-extra {
+        align-items: flex-end;
     }
 
     .ta-theme-row {
