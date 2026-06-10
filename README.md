@@ -24,7 +24,7 @@ A popup for managing all installed themes in one place.
 
 - **Search** with live filtering by name
 - **Select All** for bulk operations
-- **Skip confirmation** toggle for fast bulk deletion without per-item prompts
+- **Skip confirmation** toggle to suppress the batch confirmation prompt before bulk deletion (SillyTavern's per-theme dialogs are always auto-confirmed during a batch)
 - **Favorites** via the star icon next to each theme (favorites float to the top)
 - **Bulk Delete** for selected themes, routed through the native `#ui-preset-delete-button` with auto-confirmation of the resulting dialog
 
@@ -36,8 +36,11 @@ A popup for managing all installed themes in one place.
 
 One-click import of `.json` theme files.
 
-- If a theme with the same name already exists, a confirmation popup offers **Delete** (replace the old theme with the new one) or **Cancel** (skip the file)
-- Import itself is performed through the native `#ui-preset-import-button`, so all SillyTavern validation and storage logic is preserved
+- If a theme with the same name already exists, a confirmation popup offers **Replace** (delete the old theme and import the new one) or **Skip** (skip the file)
+- Import itself is performed through the native `#ui_preset_import_file` input, so all SillyTavern validation and storage logic is preserved
+
+### Native Multi-Import
+SillyTavern's own theme import button (in **User Settings -> UI Theme**) normally accepts a single `.json` at a time. ThemeAssist upgrades the native file input to accept **multiple files and `.zip` archives** — just like character cards. Selecting a single `.json` still goes through SillyTavern's untouched native code path; selecting several files (or a zip) routes them through ThemeAssist's bulk import pipeline with per-conflict Replace/Skip prompts. After a bulk import finishes, the last successfully imported theme is applied.
 
 ### Auto-accept @import CSS Dialog
 SillyTavern displays a confirmation popup when a theme's Custom CSS contains `@import` lines. ThemeAssist watches for this popup and automatically clicks **Yes**, eliminating the interruption during bulk imports. The behavior is toggled by the **Auto-accept @import** checkbox in the Theme Manager and is enabled by default.
@@ -109,8 +112,10 @@ All settings are persisted in `extensionSettings["ST-ThemeAssist"]` and synced t
 |-----|---------|-------------|
 | `favorites` | `[]` | Array of favorite theme names |
 | `collapsed` | `true` | Whether the inline panel is collapsed by default |
-| `skipConfirm` | `true` | Skip native confirmation dialogs on bulk delete |
+| `skipConfirm` | `true` | Skip the batch confirmation prompt on bulk delete |
 | `autoConfirmImport` | `true` | Auto-click Yes on the @import Custom CSS popup |
+| `folders` | `[]` | Soft folders: `{ id, name, themes[] }`, a theme may be in several |
+| `sortMode` | `'alpha'` | Theme list order: `'alpha'` (A→Z) or `'date'` (newest first) |
 
 ## Theme Compatibility
 
@@ -142,13 +147,16 @@ The HTML template is loaded at runtime via `$.get` and is not referenced directl
 The panel is inserted after the `.flex-container` row that wraps `#themes`. If that structure cannot be found, it falls back to appending to `#UI-Theme-Block`, then to `#extensions_settings2`.
 
 ### Import Routing
-All imports go through SillyTavern's own `#ui-preset-import-button`. A `File` object is injected into the hidden `<input type="file">` via `DataTransfer`, and a `change` event is dispatched. This preserves all native validation, storage, and side effects.
+All imports go through SillyTavern's own hidden `#ui_preset_import_file` input. A `File` object is injected via `DataTransfer`, and a `change` event is dispatched, which triggers SillyTavern's native `importTheme()`. This preserves all native validation, storage, and side effects. After dispatch, the extension polls `#themes` until the new option actually appears (time spent with an open SillyTavern popup, such as the @import warning, is not counted against the timeout).
+
+### Native Multi-Import Interception
+The native input is given the `multiple` attribute and `.zip` is added to its `accept` list. A capture-phase `change` listener on `document` (which always runs before listeners on the target element itself) inspects the selection: a single `.json` is allowed through to SillyTavern's own handler untouched; multiple files or zips are intercepted with `stopImmediatePropagation()` and routed through the bulk import pipeline.
 
 ### Duplicate Resolution
-When the imported JSON's `presetname` or `name` matches an existing option in the `#themes` dropdown, the extension offers to delete the old theme first. Deletion is performed via the native `#ui-preset-delete-button` with auto-confirmation of the resulting popup via `.popup-button-ok`.
+When the imported JSON's `name` (the key SillyTavern's `importTheme()` checks) matches an existing option in the `#themes` dropdown, the extension offers to delete the old theme first. Deletion is performed via the native `#ui-preset-delete-button`, with auto-confirmation targeting only an open, visible SillyTavern dialog whose text matches the theme-delete prompt.
 
 ### @import Popup Handler
-A `MutationObserver` on `document.body` (subtree + childList + characterData) combined with a 500 ms `setInterval` fallback scans for `.popup-button-ok` elements whose parent popup contains the substring `@import`. A visibility check via `getBoundingClientRect()` prevents clicks on hidden popups. A deduplication flag on the popup container prevents repeated clicks. The click is dispatched three ways (`click()`, `mousedown`, `mouseup`) for compatibility with different event handlers.
+A `MutationObserver` on `document.body` (subtree + childList) watches for SillyTavern popup containers (`dialog.popup`, `#dialogue_popup`) whose text matches the exact phrasing of SillyTavern's `themeImportWarning` template. A visibility check via `getBoundingClientRect()` prevents clicks on hidden popups, and a deduplication flag on the popup container prevents repeated clicks. The handler is disarmed during the first seconds after page load to avoid racing SillyTavern's initialization.
 
 ## Requirements
 

@@ -15,6 +15,48 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+/** True while a bulk import is running — the auto-apply observer must not
+ *  apply every single imported theme one by one. */
+let taSuppressAutoApply = false;
+
+/** Returns true if #themes currently has an option with this value. */
+function themeOptionExists(themeSelect, name) {
+    return Array.from(themeSelect.options).some(o => o.value === name);
+}
+
+/** True if any ST popup is currently open and visible (e.g. the @import
+ *  warning waiting for the user). Used to pause import timeouts. */
+function isAnyStPopupOpen() {
+    const popups = document.querySelectorAll('dialog.popup[open], #dialogue_popup');
+    for (const p of popups) {
+        const r = p.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return true;
+    }
+    return false;
+}
+
+/**
+ * Waits until a theme option appears in (or disappears from) #themes.
+ * Time spent while an ST popup is open (e.g. the @import confirmation
+ * waiting for the user) does NOT count against the timeout.
+ * @returns {Promise<boolean>} true if the desired state was reached.
+ */
+async function waitForThemeOption(themeSelect, name, { present = true, timeoutMs = 6000 } = {}) {
+    let waited = 0;
+    const step = 120;
+    while (waited < timeoutMs) {
+        if (themeOptionExists(themeSelect, name) === present) return true;
+        await sleep(step);
+        // Don't run down the clock while ST is waiting for the user.
+        if (!isAnyStPopupOpen()) waited += step;
+    }
+    return themeOptionExists(themeSelect, name) === present;
+}
+
 /* ============================================================
  * SETTINGS STORE
  * ============================================================ */
@@ -160,13 +202,27 @@ function applyThemeByName(themeSelect, name) {
 }
 
 
-async function waitForPopupAndConfirm() {
-    for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 150));
-        const okBtn = document.querySelector('.popup-button-ok');
-        if (okBtn) {
+/**
+ * Waits for an OPEN, VISIBLE ST popup and clicks its OK button.
+ * Previously this clicked the first `.popup-button-ok` found anywhere in
+ * the document — including buttons inside closed <dialog> templates kept
+ * in the DOM — which made bulk deletes confirm the wrong (or no) dialog.
+ * @param {(popupEl: Element) => boolean} [match] Optional text predicate.
+ */
+async function waitForPopupAndConfirm(match = null) {
+    for (let i = 0; i < 25; i++) {
+        await sleep(120);
+        const popups = document.querySelectorAll('dialog.popup[open], #dialogue_popup');
+        for (const popup of popups) {
+            const pr = popup.getBoundingClientRect();
+            if (pr.width === 0 || pr.height === 0) continue;
+            if (match && !match(popup)) continue;
+            const okBtn = popup.querySelector('.popup-button-ok');
+            if (!okBtn) continue;
+            const r = okBtn.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
             okBtn.click();
-            await new Promise(r => setTimeout(r, 300));
+            await sleep(250);
             return true;
         }
     }
@@ -174,13 +230,27 @@ async function waitForPopupAndConfirm() {
 }
 
 async function deleteThemeByName(themeSelect, name, skipConfirm = true) {
-    themeSelect.value = name;
-    themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    await new Promise(r => setTimeout(r, 350));
+    if (!themeOptionExists(themeSelect, name)) {
+        throw new Error(`Theme "${name}" not found in #themes`);
+    }
+    applyThemeByName(themeSelect, name);
+    await sleep(350);
     const delBtn = document.getElementById('ui-preset-delete-button');
     if (!delBtn) throw new Error('Delete button not found');
     delBtn.click();
-    if (skipConfirm) await waitForPopupAndConfirm();
+    if (skipConfirm) {
+        // Only confirm the actual theme-deletion popup, never an unrelated
+        // one. The prompt text is localized (data-i18n), but the quoted
+        // theme name is always rendered verbatim — match on either.
+        const confirmed = await waitForPopupAndConfirm((p) => {
+            const txt = (p.textContent || '');
+            return txt.toLowerCase().includes('delete the theme') || txt.includes(`"${name}"`);
+        });
+        if (!confirmed) throw new Error('Delete confirmation popup not found');
+    }
+    // Wait for ST to actually remove the option (server roundtrip).
+    const gone = await waitForThemeOption(themeSelect, name, { present: false, timeoutMs: 5000 });
+    if (!gone) throw new Error(`Theme "${name}" was not removed`);
 }
 
 /* ============================================================
@@ -379,6 +449,10 @@ jQuery(async () => {
             // Update knownThemes for everything we saw added.
             for (const name of addedInBatch) knownThemes.add(name);
             if (!autoApplyArmed) return;
+            // During a bulk import our import flow applies the LAST theme
+            // itself; auto-applying every intermediate one is noisy and can
+            // race with ST's import logic.
+            if (taSuppressAutoApply) return;
 
             // Only pick truly-new additions: not seen before AND not a
             // simultaneous re-add of something we just "lost".
@@ -394,7 +468,7 @@ jQuery(async () => {
             const name = trulyNew[0];
             try {
                 applyThemeByName(themeSelect, name);
-                toastr.success(`Applied: "${name}"`, DISPLAY_NAME);
+                toastr.success(`Applied: "${escapeHtml(name)}"`, DISPLAY_NAME);
             } catch (err) {
                 console.error(`[${MODULE_NAME}] Auto-apply failed:`, err);
             }
@@ -410,6 +484,9 @@ jQuery(async () => {
 
         $('#ta_theme_manager_btn').on('click', (e) => { e.stopPropagation(); openThemeManager(themeSelect); });
         $('#ta_duplicates_btn').on('click', (e) => { e.stopPropagation(); openImportWithReplace(themeSelect); });
+
+        // Let ST's own import button accept multiple files and zips.
+        enableNativeMultiImport(themeSelect);
 
         renderFavoritesPanel(themeSelect);
         console.log(`[${MODULE_NAME}] Loaded successfully`);
@@ -438,7 +515,7 @@ function renderFavoritesPanel(themeSelect) {
         `);
         item.find('.ta-fav-name').on('click', () => {
             applyThemeByName(themeSelect, fav);
-            toastr.success(`Applied: "${fav}"`, DISPLAY_NAME);
+            toastr.success(`Applied: "${escapeHtml(fav)}"`, DISPLAY_NAME);
         });
         item.find('.ta-fav-remove').on('click', (e) => {
             e.stopPropagation();
@@ -647,7 +724,7 @@ function openThemeManager(themeSelect) {
             });
             row.find('.ta-theme-name').on('click', () => {
                 applyThemeByName(themeSelect, name);
-                toastr.success(`Applied: "${name}"`, DISPLAY_NAME);
+                toastr.success(`Applied: "${escapeHtml(name)}"`, DISPLAY_NAME);
             });
             row.find('.ta-theme-folders').on('click', (e) => {
                 e.stopPropagation();
@@ -849,7 +926,7 @@ function openThemeManager(themeSelect) {
                 `);
                 row.find('[data-act=add]').on('click', () => {
                     for (const n of themeNames) addThemeToFolder(f.id, n);
-                    toastr.success(`Added ${themeNames.length} theme(s) to "${f.name}"`, DISPLAY_NAME);
+                    toastr.success(`Added ${themeNames.length} theme(s) to "${escapeHtml(f.name)}"`, DISPLAY_NAME);
                     draw();
                 });
                 $checks.append(row);
@@ -912,7 +989,7 @@ function openThemeManager(themeSelect) {
         const skip = $skipConfirm.prop('checked');
         if (!skip && !confirm(`Delete ${sel.length} theme(s)?`)) return;
         overlay.remove();
-        await bulkDeleteThemes(sel, themeSelect, skip);
+        await bulkDeleteThemes(sel, themeSelect);
     });
 
     /* ---------- Inline folder creation ----------
@@ -1113,24 +1190,30 @@ async function bulkExportThemes(names) {
     }
 }
 
-async function bulkDeleteThemes(names, themeSelect, skipConfirm) {
+async function bulkDeleteThemes(names, themeSelect) {
     let ok = 0, fail = 0;
     for (const name of names) {
         try {
-            await deleteThemeByName(themeSelect, name, skipConfirm);
+            // Always auto-confirm ST's per-theme popup here: the user already
+            // confirmed the whole batch in the Theme Manager. Passing the
+            // 'skip confirmation' checkbox through (as before) meant that
+            // with the checkbox off, ST's popup stayed open while the loop
+            // raced ahead to the next theme.
+            await deleteThemeByName(themeSelect, name, true);
             // Also clean the deleted theme out of favorites and folders.
             const favs = getSettings().favorites;
             const fi = favs.indexOf(name);
             if (fi !== -1) { favs.splice(fi, 1); saveSettings(); }
             purgeThemeFromFolders(name);
-            await new Promise(r => setTimeout(r, 200));
+            await sleep(150);
             ok++;
         } catch (err) {
             console.error(`[${MODULE_NAME}] Delete failed: ${name}`, err);
             fail++;
         }
     }
-    toastr.success(`Deleted ${ok}${fail ? `, failed ${fail}` : ''}`, DISPLAY_NAME);
+    if (fail) toastr.warning(`Deleted ${ok}, failed ${fail}`, DISPLAY_NAME);
+    else toastr.success(`Deleted ${ok}`, DISPLAY_NAME);
     renderFavoritesPanel(themeSelect);
 }
 
@@ -1142,97 +1225,227 @@ function openImportWithReplace(themeSelect) {
     input.type = 'file';
     input.accept = '.json,.zip';
     input.multiple = true;
-    input.addEventListener('change', async (e) => {
+    input.addEventListener('change', async () => {
         const files = Array.from(input.files);
         if (files.length === 0) return;
-
-        // Flatten zips into json files
-        const jsonFiles = [];
-        for (const file of files) {
-            if (file.name.endsWith('.zip')) {
-                const JSZip = await loadJSZip();
-                const zipData = await JSZip.loadAsync(file);
-                const jsons = Object.keys(zipData.files).filter(f => f.endsWith('.json'));
-                for (const jn of jsons) {
-                    try {
-                        const content = await zipData.files[jn].async('blob');
-                        jsonFiles.push(new File([content], jn, { type: 'application/json' }));
-                    } catch (err) { console.warn(err); }
-                }
-            } else if (file.name.endsWith('.json')) {
-                jsonFiles.push(file);
-            }
-        }
-
-        if (jsonFiles.length === 0) { toastr.error('No theme files found', DISPLAY_NAME); return; }
-        toastr.info(`Processing ${jsonFiles.length} file(s)...`, DISPLAY_NAME);
-
-        let imported = 0, skipped = 0;
-        for (const jf of jsonFiles) {
-            try {
-                const res = await importThemeWithReplacePrompt(jf, themeSelect);
-                if (res) imported++; else skipped++;
-                await new Promise(r => setTimeout(r, 400));
-            } catch (err) {
-                console.error(err);
-                skipped++;
-            }
-        }
-        toastr.success(`Imported ${imported}${skipped ? `, skipped ${skipped}` : ''}`, DISPLAY_NAME);
+        await runBulkImport(files, themeSelect);
     });
     input.click();
 }
 
-function importViaNativeButton(file) {
-    return new Promise((resolve, reject) => {
-        const importBtn = document.getElementById('ui-preset-import-button');
-        if (!importBtn) { reject(new Error('Import button not found')); return; }
-        let fileInput = importBtn.querySelector('input[type="file"]');
-        if (!fileInput) {
-            fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = '.json';
-            fileInput.style.display = 'none';
-            importBtn.appendChild(fileInput);
+/**
+ * Expands a mixed list of .json/.zip files into a flat list of theme JSON
+ * File objects. Zip entries that are directories, hidden files or macOS
+ * metadata (__MACOSX/, .DS_Store, ._*) are skipped.
+ * @param {File[]} files
+ * @returns {Promise<File[]>}
+ */
+async function expandThemeFiles(files) {
+    const jsonFiles = [];
+    for (const file of files) {
+        const lower = file.name.toLowerCase();
+        if (lower.endsWith('.zip')) {
+            try {
+                const JSZip = await loadJSZip();
+                const zipData = await JSZip.loadAsync(file);
+                for (const [path, entry] of Object.entries(zipData.files)) {
+                    if (entry.dir) continue;
+                    if (!path.toLowerCase().endsWith('.json')) continue;
+                    const base = path.split('/').pop();
+                    if (path.startsWith('__MACOSX/') || base.startsWith('._') || base.startsWith('.')) continue;
+                    try {
+                        const content = await entry.async('blob');
+                        jsonFiles.push(new File([content], base, { type: 'application/json' }));
+                    } catch (err) { console.warn(`[${MODULE_NAME}] Failed to read zip entry ${path}`, err); }
+                }
+            } catch (err) {
+                console.error(`[${MODULE_NAME}] Failed to open zip ${file.name}`, err);
+                toastr.error(`Cannot open zip: ${escapeHtml(file.name)}`, DISPLAY_NAME);
+            }
+        } else if (lower.endsWith('.json')) {
+            jsonFiles.push(file);
         }
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        fileInput.files = dt.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        setTimeout(resolve, 800);
-    });
+    }
+    return jsonFiles;
 }
 
+/**
+ * Imports many theme files sequentially through ST's native pipeline,
+ * prompting per conflict. While the batch runs, the auto-apply observer is
+ * suppressed; the last successfully imported theme is applied at the end.
+ * @param {File[]} files Raw user-picked files (.json and/or .zip).
+ * @param {HTMLSelectElement} themeSelect
+ */
+async function runBulkImport(files, themeSelect) {
+    const jsonFiles = await expandThemeFiles(files);
+    if (jsonFiles.length === 0) { toastr.error('No theme files found', DISPLAY_NAME); return; }
+    toastr.info(`Processing ${jsonFiles.length} file(s)...`, DISPLAY_NAME);
+
+    taSuppressAutoApply = true;
+    let imported = 0, skipped = 0;
+    let lastImportedName = null;
+    try {
+        for (const jf of jsonFiles) {
+            try {
+                const res = await importThemeWithReplacePrompt(jf, themeSelect);
+                if (res && res.ok) {
+                    imported++;
+                    if (res.name) lastImportedName = res.name;
+                } else {
+                    skipped++;
+                }
+                await sleep(250);
+            } catch (err) {
+                console.error(`[${MODULE_NAME}] Import failed for ${jf.name}:`, err);
+                skipped++;
+            }
+        }
+    } finally {
+        taSuppressAutoApply = false;
+    }
+
+    if (lastImportedName && themeOptionExists(themeSelect, lastImportedName)) {
+        try {
+            applyThemeByName(themeSelect, lastImportedName);
+        } catch (err) { console.warn(`[${MODULE_NAME}] Auto-apply after import failed:`, err); }
+    }
+    const msg = `Imported ${imported}${skipped ? `, skipped ${skipped}` : ''}`;
+    if (imported > 0) toastr.success(msg, DISPLAY_NAME);
+    else toastr.warning(msg, DISPLAY_NAME);
+}
+
+/**
+ * Upgrades ST's native theme import input (#ui_preset_import_file) to accept
+ * multiple files and zip archives. When the user picks exactly one .json we
+ * step aside and let ST's own handler run untouched; for multiple files or
+ * zips we intercept (capture phase, before ST's listener) and run our bulk
+ * pipeline instead — so character-card-style multi-import now works for
+ * themes too.
+ */
+function enableNativeMultiImport(themeSelect) {
+    const fileInput = document.getElementById('ui_preset_import_file');
+    if (!fileInput) {
+        console.warn(`[${MODULE_NAME}] #ui_preset_import_file not found — native multi-import disabled`);
+        return;
+    }
+    fileInput.setAttribute('multiple', '');
+    // Allow zips in the picker as well.
+    fileInput.setAttribute('accept', '.json,.zip');
+    // IMPORTANT: the intercept listener must run BEFORE ST's own jQuery
+    // 'change' handler on the input. Capture listeners on the input itself
+    // would NOT help — at the target element listeners fire in registration
+    // order regardless of the capture flag, and ST registered first. A
+    // capture listener on an ANCESTOR (document) however always runs before
+    // any listener on the target.
+    document.addEventListener('change', (e) => {
+        if (e.target !== fileInput) return;
+        const files = Array.from(fileInput.files || []);
+        const needsIntercept = files.length > 1
+            || files.some(f => f.name.toLowerCase().endsWith('.zip'));
+        if (!needsIntercept) return; // single .json → ST handles it natively
+        // Stop ST's own handler (it only reads files[0] and would double-import).
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        // Clear the input like ST's finally{} does, so re-picking the same
+        // files fires change again.
+        const picked = files.slice();
+        fileInput.value = '';
+        runBulkImport(picked, themeSelect);
+    }, true);
+}
+
+/**
+ * Feeds a single theme .json file into ST's own import pipeline by setting
+ * the files of ST's native hidden input (#ui_preset_import_file) and firing
+ * its change handler.
+ *
+ * BUGFIX: this used to look for `#ui-preset-import-button` (with dashes) and
+ * append its own <input> inside it. ST's real elements are
+ * `#ui_preset_import_button` / `#ui_preset_import_file` (underscores), so
+ * the lookup always failed and Smart Import was broken. We now target the
+ * real input directly, with the old approach kept only as a fallback for
+ * forks that renamed it.
+ *
+ * @param {File} file Theme JSON file.
+ * @param {HTMLSelectElement|null} themeSelect If given (with expectName), we
+ *        wait until the option actually appears instead of a blind delay.
+ * @param {string|null} expectName Theme name expected to appear in #themes.
+ * @returns {Promise<boolean>} true if import was confirmed (option appeared)
+ *          or could not be verified; rejects only on infra errors.
+ */
+async function importViaNativeButton(file, themeSelect = null, expectName = null) {
+    let fileInput = document.getElementById('ui_preset_import_file');
+    if (!fileInput) {
+        // Fallback for forks: any file input near the import button.
+        const importBtn = document.getElementById('ui_preset_import_button')
+            || document.getElementById('ui-preset-import-button');
+        if (importBtn) {
+            fileInput = importBtn.querySelector('input[type="file"]')
+                || importBtn.parentElement?.querySelector('input[type="file"]')
+                || null;
+        }
+    }
+    if (!fileInput) throw new Error('Native theme import input not found');
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (themeSelect && expectName) {
+        // ST shows the @import warning popup before adding the option; the
+        // waiter ignores time spent while a popup is open, so manual
+        // confirmation doesn't cause a false negative.
+        return await waitForThemeOption(themeSelect, expectName, { present: true, timeoutMs: 8000 });
+    }
+    await sleep(800);
+    return true;
+}
+
+/**
+ * Imports one theme JSON, prompting if a theme with the same name already
+ * exists (ST itself refuses to overwrite).
+ * @returns {Promise<{ok: boolean, name: string|null}>}
+ */
 async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
     let presetName = null;
     let freshFile = jsonFile;
     try {
         const text = await jsonFile.text();
         const data = JSON.parse(text);
-        presetName = data.presetname || data.name || null;
+        // ST's importTheme() keys EXCLUSIVELY on `parsed.name` (and throws
+        // if it's missing). Checking `presetname` first could compare the
+        // wrong key and miss a genuine conflict.
+        presetName = (typeof data.name === 'string' && data.name) ? data.name : null;
         freshFile = new File([text], jsonFile.name, { type: jsonFile.type || 'application/json' });
     } catch (err) {
-        console.warn(`[${MODULE_NAME}] Cannot parse`, jsonFile.name);
-        await importViaNativeButton(jsonFile);
-        return true;
+        // ST's importTheme() does JSON.parse(fileText) and would throw too.
+        // Don't feed it garbage and don't count it as imported.
+        console.warn(`[${MODULE_NAME}] Cannot parse ${jsonFile.name}:`, err);
+        toastr.error(`Not a valid theme JSON: ${escapeHtml(jsonFile.name)}`, DISPLAY_NAME);
+        return { ok: false, name: null };
     }
 
     if (!presetName) {
-        await importViaNativeButton(freshFile);
-        return true;
+        // ST throws 'Missing name' for such files.
+        console.warn(`[${MODULE_NAME}] ${jsonFile.name} has no "name" field`);
+        toastr.error(`Theme file has no name: ${escapeHtml(jsonFile.name)}`, DISPLAY_NAME);
+        return { ok: false, name: null };
     }
 
-    const existing = Array.from(themeSelect.options).find(o => o.value === presetName);
-    if (!existing) {
-        await importViaNativeButton(freshFile);
-        toastr.success(`Imported new theme: "${presetName}"`, DISPLAY_NAME);
-        return true;
+    if (!themeOptionExists(themeSelect, presetName)) {
+        const ok = await importViaNativeButton(freshFile, themeSelect, presetName);
+        if (ok) toastr.success(`Imported: "${escapeHtml(presetName)}"`, DISPLAY_NAME);
+        else toastr.error(`Import failed: "${escapeHtml(presetName)}"`, DISPLAY_NAME);
+        return { ok, name: ok ? presetName : null };
     }
 
-    // Conflict — ask user
+    // Conflict — ask user. NOTE: class instead of id (the main Theme Manager
+    // also uses #ta_popup_overlay; duplicate ids broke its CSS/queries when
+    // both were open at once).
     return new Promise((resolve) => {
         const overlay = $(`
-            <div id="ta_popup_overlay">
+            <div class="ta-popup-overlay-extra">
                 <div class="ta-popup" style="width:440px">
                     <div class="ta-popup-header">
                         <h3><i class="fa-solid fa-triangle-exclamation"></i> Theme already exists</h3>
@@ -1245,11 +1458,11 @@ async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
                     <div class="ta-popup-footer">
                         <div></div>
                         <div class="ta-footer-buttons">
-                            <div class="menu_button ta-btn" id="ta_repl_cancel">
-                                <i class="fa-solid fa-ban"></i>&nbsp;Cancel
+                            <div class="menu_button ta-btn" data-act="cancel">
+                                <i class="fa-solid fa-ban"></i>&nbsp;Skip
                             </div>
-                            <div class="menu_button ta-btn ta-btn-danger" id="ta_repl_confirm">
-                                <i class="fa-solid fa-trash"></i>&nbsp;Delete
+                            <div class="menu_button ta-btn ta-btn-danger" data-act="replace">
+                                <i class="fa-solid fa-trash"></i>&nbsp;Replace
                             </div>
                         </div>
                     </div>
@@ -1258,21 +1471,27 @@ async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
         `);
         $('body').append(overlay);
         const close = () => overlay.remove();
-        overlay.find('.ta-close-btn, #ta_repl_cancel').on('click', () => { close(); toastr.info(`Skipped "${presetName}"`, DISPLAY_NAME); resolve(false); });
-        overlay.on('click', (e) => { if (e.target === overlay[0]) { close(); resolve(false); } });
+        overlay.find('.ta-close-btn, [data-act=cancel]').on('click', () => {
+            close();
+            toastr.info(`Skipped "${escapeHtml(presetName)}"`, DISPLAY_NAME);
+            resolve({ ok: false, name: null });
+        });
+        overlay.on('click', (e) => {
+            if (e.target === overlay[0]) { close(); resolve({ ok: false, name: null }); }
+        });
 
-        overlay.find('#ta_repl_confirm').on('click', async () => {
+        overlay.find('[data-act=replace]').on('click', async () => {
             close();
             try {
                 await deleteThemeByName(themeSelect, presetName, true);
-                await new Promise(r => setTimeout(r, 400));
-                await importViaNativeButton(freshFile);
-                toastr.success(`Replaced "${presetName}"`, DISPLAY_NAME);
-                resolve(true);
+                const ok = await importViaNativeButton(freshFile, themeSelect, presetName);
+                if (!ok) throw new Error('re-import did not complete');
+                toastr.success(`Replaced "${escapeHtml(presetName)}"`, DISPLAY_NAME);
+                resolve({ ok: true, name: presetName });
             } catch (err) {
-                console.error(err);
-                toastr.error(`Failed to replace "${presetName}"`, DISPLAY_NAME);
-                resolve(false);
+                console.error(`[${MODULE_NAME}] Replace failed for "${presetName}":`, err);
+                toastr.error(`Failed to replace "${escapeHtml(presetName)}"`, DISPLAY_NAME);
+                resolve({ ok: false, name: null });
             }
         });
     });
