@@ -113,6 +113,8 @@ function getSettings() {
     // per-bot, keyed by the character's stable `avatar` filename (or by
     // `group:<id>` for group chats), so they survive list re-sorts/reloads.
     if (typeof s.perBotMode !== 'boolean') s.perBotMode = false;
+    // Whether the Folders section in the Theme Manager is collapsed.
+    if (typeof s.foldersCollapsed !== 'boolean') s.foldersCollapsed = false;
     if (!s.botThemes || typeof s.botThemes !== 'object' || Array.isArray(s.botThemes)) {
         s.botThemes = {};
     } else {
@@ -936,9 +938,10 @@ function openThemeManager(themeSelect) {
                         </div>
                         <div class="ta-perbot-bar-info" id="ta_mgr_perbot_info"></div>
                     </div>
-                    <div class="ta-folders-wrap">
+                    <div class="ta-folders-wrap" id="ta_folders_wrap">
                         <div class="ta-folders-header">
-                            <span class="ta-folders-title">
+                            <span class="ta-folders-title" id="ta_folders_toggle" title="Collapse / expand folders">
+                                <i class="fa-solid fa-chevron-down ta-folders-chevron"></i>
                                 <i class="fa-solid fa-folder"></i>
                                 <span>Folders</span>
                             </span>
@@ -948,18 +951,20 @@ function openThemeManager(themeSelect) {
                                 </div>
                             </div>
                         </div>
-                        <div class="ta-folder-create-row" id="ta_folder_create_row" style="display:none">
-                            <i class="fa-solid fa-folder"></i>
-                            <input type="text" class="ta-search-input" id="ta_new_folder_input"
-                                   placeholder="New folder name..." maxlength="64">
-                            <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_confirm" title="Create folder">
-                                <i class="fa-solid fa-check"></i>
+                        <div class="ta-folders-collapsible">
+                            <div class="ta-folder-create-row" id="ta_folder_create_row" style="display:none">
+                                <i class="fa-solid fa-folder"></i>
+                                <input type="text" class="ta-search-input" id="ta_new_folder_input"
+                                       placeholder="New folder name..." maxlength="64">
+                                <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_confirm" title="Create folder">
+                                    <i class="fa-solid fa-check"></i>
+                                </div>
+                                <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_cancel" title="Cancel">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </div>
                             </div>
-                            <div class="menu_button ta-btn ta-btn-small" id="ta_folder_create_cancel" title="Cancel">
-                                <i class="fa-solid fa-xmark"></i>
-                            </div>
+                            <div id="ta_folders_list" class="ta-folders-list"></div>
                         </div>
-                        <div id="ta_folders_list" class="ta-folders-list"></div>
                     </div>
                     <div class="ta-list-controls">
                         <span id="ta_stats">${allThemes.length} themes · ${favs.size} favorites</span>
@@ -1434,7 +1439,26 @@ function openThemeManager(themeSelect) {
         renderFolders();
     }
 
+    // Collapse / expand the Folders section to save vertical space.
+    const $foldersWrap = overlay.find('#ta_folders_wrap');
+    function applyFoldersCollapsed() {
+        $foldersWrap.toggleClass('ta-folders-collapsed', settings.foldersCollapsed === true);
+    }
+    overlay.find('#ta_folders_toggle').on('click', () => {
+        settings.foldersCollapsed = !settings.foldersCollapsed;
+        saveSettings();
+        applyFoldersCollapsed();
+    });
+    applyFoldersCollapsed();
+
     overlay.find('#ta_new_folder_btn').on('click', () => {
+        // Expanding via creating a folder makes no sense while collapsed —
+        // expand the section first so the input is visible.
+        if (settings.foldersCollapsed) {
+            settings.foldersCollapsed = false;
+            saveSettings();
+            applyFoldersCollapsed();
+        }
         // Toggle: if already open, just refocus the input.
         if ($createRow.is(':visible')) $createInput.trigger('focus');
         else openFolderCreateRow();

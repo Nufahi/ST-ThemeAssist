@@ -532,9 +532,23 @@
     letter-spacing: 0.5px;
     opacity: 0.65;
     font-weight: 600;
+    cursor: pointer;
+    user-select: none;
 }
 
+.ta-folders-title:hover { opacity: 0.9; }
+
 .ta-folders-title i { color: var(--ta-accent); }
+
+.ta-folders-chevron {
+    font-size: 0.85em;
+    transition: transform 0.2s ease;
+}
+
+/* Collapsed state: rotate chevron, hide the list, tighten the header. */
+.ta-folders-collapsed .ta-folders-chevron { transform: rotate(-90deg); }
+.ta-folders-collapsed .ta-folders-collapsible { display: none; }
+.ta-folders-collapsed .ta-folders-header { margin-bottom: 0; }
 
 .ta-folders-actions { display: flex; gap: 6px; }
 
