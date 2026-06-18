@@ -47,6 +47,18 @@ SillyTavern displays a confirmation popup when a theme's Custom CSS contains `@i
 
 Detection is handled by a `MutationObserver` on `document.body` combined with a 500 ms polling safety net. The Yes button is located globally by the `.popup-button-ok` selector, with a visibility check through `getBoundingClientRect()` to ignore hidden popups, and a `@import` text check on the parent container to avoid false positives.
 
+### Per-Bot Themes
+Link a UI theme to a specific character (or group) so the look of the app follows whoever you are chatting with. Inspired by [background-manager](https://github.com/aceeenvw/background-manager)'s global/per-chat split, but applied to themes and keyed to the **bot** rather than the individual chat.
+
+- A **Per-bot themes** toggle in the inline panel switches between two modes:
+  - **Global** (default): themes never change on their own — you stay on whatever theme you picked.
+  - **Per-bot** (toggle ON): when you open a chat, the theme linked to that character/group is applied automatically.
+- Use **Link** to bind the *currently active* theme to the *currently open* bot, and **Unlink** to remove the binding.
+- Bots without a binding keep the current theme — nothing is forced.
+- Bindings are keyed by the character's stable `avatar` filename (or `group:<id>` for groups), so they survive theme-list re-sorts and reloads. Deleting a theme automatically clears any bot bound to it.
+
+Switching is built on SillyTavern's native `CHAT_CHANGED` event and applies themes through the same `#themes` selector path the native UI uses.
+
 ### Quick Favorites
 Starred themes appear in the **Favorites** section of the panel. Click the theme name to apply it instantly. Click the `x` to remove it from favorites. The star color adapts to the current theme via `--SmartThemeEmColor` with a fallback chain to `--SmartThemeQuoteColor` and the extension's own accent variable.
 
@@ -116,6 +128,8 @@ All settings are persisted in `extensionSettings["ST-ThemeAssist"]` and synced t
 | `autoConfirmImport` | `true` | Auto-click Yes on the @import Custom CSS popup |
 | `folders` | `[]` | Soft folders: `{ id, name, themes[] }`, a theme may be in several |
 | `sortMode` | `'alpha'` | Theme list order: `'alpha'` (A→Z) or `'date'` (newest first) |
+| `perBotMode` | `false` | When `true`, opening a bot's chat applies its linked theme |
+| `botThemes` | `{}` | Map of bot key (`avatar` or `group:<id>`) → theme name |
 
 ## Theme Compatibility
 

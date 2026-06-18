@@ -1,6 +1,38 @@
 const MODULE_NAME = 'ST-ThemeAssist';
 const DISPLAY_NAME = 'ThemeAssist';
-const extPath = `scripts/extensions/third-party/${MODULE_NAME}`;
+
+/**
+ * Resolve the folder this assist.js was actually loaded from, instead of
+ * hardcoding `third-party/ST-ThemeAssist`. The extension may be installed
+ * under a different folder name (e.g. `ThemeAssist-test`), in which case a
+ * hardcoded path makes `$.get(assist.html)` 404 and the whole panel fails
+ * to mount. We derive the base path from this script's own <src>.
+ */
+function resolveExtPath() {
+    try {
+        // Prefer document.currentScript when available (module top-level).
+        const cur = document.currentScript && document.currentScript.src;
+        const fromScript = cur || (() => {
+            const s = Array.from(document.querySelectorAll('script[src]'))
+                .map(el => el.src)
+                .find(src => /\/assist\.js(\?|$)/.test(src));
+            return s || '';
+        })();
+        if (fromScript) {
+            // Strip the trailing "/assist.js" and make it relative to origin.
+            const url = new URL(fromScript, window.location.href);
+            const dir = url.pathname.replace(/\/assist\.js.*$/, '');
+            // Return a path ST's $.get understands (relative to site root).
+            return dir.replace(/^\//, '');
+        }
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] resolveExtPath failed, falling back:`, e);
+    }
+    // Fallback: original default folder name.
+    return `scripts/extensions/third-party/${MODULE_NAME}`;
+}
+
+const extPath = resolveExtPath();
 
 /* ============================================================
  * UTILS
@@ -75,6 +107,19 @@ function getSettings() {
     // (most recently added first, based on <option> order in #themes).
     if (typeof s.sortMode !== 'string' || !['alpha', 'date'].includes(s.sortMode)) {
         s.sortMode = 'alpha';
+    }
+    // Per-bot themes. When `perBotMode` is on, opening a chat/character that
+    // has a bound theme switches to it automatically. Bindings are stored
+    // per-bot, keyed by the character's stable `avatar` filename (or by
+    // `group:<id>` for group chats), so they survive list re-sorts/reloads.
+    if (typeof s.perBotMode !== 'boolean') s.perBotMode = false;
+    if (!s.botThemes || typeof s.botThemes !== 'object' || Array.isArray(s.botThemes)) {
+        s.botThemes = {};
+    } else {
+        // Drop any malformed entries (non-string theme names).
+        for (const k of Object.keys(s.botThemes)) {
+            if (typeof s.botThemes[k] !== 'string' || !s.botThemes[k]) delete s.botThemes[k];
+        }
     }
     // Normalize legacy folder shapes in place, without recreating objects,
     // so references taken from previous calls stay valid.
@@ -172,6 +217,81 @@ function foldersOfTheme(themeName) {
 }
 
 /* ============================================================
+ * PER-BOT THEMES API
+ * A "bot" is the active single character or the active group. We key
+ * bindings by a stable identifier so they survive character-list
+ * re-sorts/reloads:
+ *   - single character → its `avatar` filename
+ *   - group chat       → `group:<group.id>`
+ * Bindings live in settings.botThemes: { [botKey]: themeName }.
+ * ============================================================ */
+
+/** Whether per-bot auto-switching is currently enabled. */
+function isPerBotMode() { return getSettings().perBotMode === true; }
+
+/**
+ * Resolves the current "bot" into a stable key + a human-readable label.
+ * Reads a FRESH context snapshot every call (getContext() values are
+ * captured at call time, not live getters).
+ * @returns {{ key: string, label: string } | null} null if no character
+ *          or group is active (e.g. welcome screen).
+ */
+function getCurrentBot() {
+    let ctx;
+    try { ctx = SillyTavern.getContext(); } catch (_) { return null; }
+    if (!ctx) return null;
+    // Group chats take precedence — in a group `characterId` is undefined.
+    if (ctx.groupId) {
+        const group = Array.isArray(ctx.groups)
+            ? ctx.groups.find(g => String(g.id) === String(ctx.groupId))
+            : null;
+        return { key: `group:${ctx.groupId}`, label: group?.name || 'Group' };
+    }
+    if (ctx.characterId !== undefined && ctx.characterId !== null && Array.isArray(ctx.characters)) {
+        const char = ctx.characters[ctx.characterId];
+        if (char && typeof char.avatar === 'string' && char.avatar) {
+            return { key: char.avatar, label: char.name || char.avatar };
+        }
+    }
+    return null;
+}
+
+/** Returns the theme name bound to a bot key, or null. */
+function getBoundTheme(botKey) {
+    if (!botKey) return null;
+    const t = getSettings().botThemes[botKey];
+    return (typeof t === 'string' && t) ? t : null;
+}
+
+/** Binds (or rebinds) a theme to a bot key. */
+function bindThemeToBot(botKey, themeName) {
+    if (!botKey || !themeName) return;
+    getSettings().botThemes[botKey] = themeName;
+    saveSettings();
+}
+
+/** Removes any theme binding for a bot key. Returns true if one existed. */
+function unbindBot(botKey) {
+    const s = getSettings();
+    if (Object.prototype.hasOwnProperty.call(s.botThemes, botKey)) {
+        delete s.botThemes[botKey];
+        saveSettings();
+        return true;
+    }
+    return false;
+}
+
+/** Remove a theme from ALL bot bindings (e.g. when the theme is deleted). */
+function purgeThemeFromBots(themeName) {
+    const s = getSettings();
+    let changed = false;
+    for (const k of Object.keys(s.botThemes)) {
+        if (s.botThemes[k] === themeName) { delete s.botThemes[k]; changed = true; }
+    }
+    if (changed) saveSettings();
+}
+
+/* ============================================================
  * NATIVE THEME ACTIONS (via ST's own buttons)
  * ============================================================ */
 function applyThemeByName(themeSelect, name) {
@@ -199,6 +319,10 @@ function applyThemeByName(themeSelect, name) {
     // The inline block may not be mounted yet during very early init.
     const lastApplied = document.getElementById('ta_last_applied');
     if (lastApplied) lastApplied.textContent = name;
+    // Keep the per-bot bind button's "current theme" hint in sync.
+    if (typeof renderPerBotPanel === 'function' && document.getElementById('ta_perbot')) {
+        try { renderPerBotPanel(themeSelect); } catch (_) { /* panel not ready */ }
+    }
 }
 
 
@@ -256,10 +380,58 @@ async function deleteThemeByName(themeSelect, name, skipConfirm = true) {
 /* ============================================================
  * MAIN INIT
  * ============================================================ */
+/** Full inline copy of assist.html, used only if the file can't be fetched. */
+function getInlinePanelHtml() {
+    return `
+<div id="ta_block" class="ta-inline-block ta-collapsed">
+    <div class="ta-inline-header" id="ta_toggle_btn" title="Click to expand">
+        <i class="fa-solid fa-wand-magic-sparkles"></i>
+        <span>ThemeAssist</span>
+        <span class="ta-inline-last" title="Last applied theme">
+            <span id="ta_last_applied">—</span>
+        </span>
+        <i class="fa-solid fa-chevron-down ta-chevron"></i>
+    </div>
+    <div class="ta-inline-body">
+        <div class="ta-inline-buttons">
+            <div id="ta_theme_manager_btn" class="menu_button ta-btn" title="Open Theme Manager">
+                <i class="fa-solid fa-sliders"></i>
+            </div>
+            <div id="ta_duplicates_btn" class="menu_button ta-btn" title="Smart Import (auto-replace existing)">
+                <i class="fa-solid fa-file-import"></i>
+            </div>
+        </div>
+        <div class="ta-inline-favs">
+            <div class="ta-inline-favs-title">
+                <i class="fa-solid fa-star"></i>
+                <span>Favorites</span>
+            </div>
+            <div id="ta_favorites_list" class="ta-fav-list"></div>
+        </div>
+    </div>
+</div>`;
+}
+
 jQuery(async () => {
-    console.log(`[${MODULE_NAME}] Loading...`);
+    console.log(`[${MODULE_NAME}] Loading... (extPath="${extPath}")`);
     try {
-        const html = await $.get(`${extPath}/assist.html`);
+        // Try the resolved path first, then a few likely folder names. If ALL
+        // fail (e.g. unexpected install folder), fall back to an inline HTML
+        // string so the panel still mounts — never let a 404 kill the panel.
+        const candidates = [
+            `${extPath}/assist.html`,
+            `scripts/extensions/third-party/ST-ThemeAssist/assist.html`,
+            `scripts/extensions/third-party/ThemeAssist-test/assist.html`,
+        ];
+        let html = null;
+        for (const url of candidates) {
+            try { html = await $.get(url); if (html) { console.log(`[${MODULE_NAME}] Loaded HTML from ${url}`); break; } }
+            catch (_) { /* try next */ }
+        }
+        if (!html) {
+            console.warn(`[${MODULE_NAME}] assist.html not found via any path — using inline fallback`);
+            html = getInlinePanelHtml();
+        }
 
         const themeSelect = document.getElementById('themes');
         const themeBlock = document.getElementById('UI-Theme-Block');
@@ -274,6 +446,10 @@ jQuery(async () => {
             $('#extensions_settings2').append(html);
             console.warn(`[${MODULE_NAME}] Fallback mount`);
         }
+
+        // Add the per-bot controls to the bottom of the panel (independent of
+        // the assist.html version — works even with a stale cached template).
+        ensurePerBotBlock();
 
         const settings = getSettings();
         // Always start collapsed unless user explicitly expanded last time
@@ -453,6 +629,7 @@ jQuery(async () => {
             // itself; auto-applying every intermediate one is noisy and can
             // race with ST's import logic.
             if (taSuppressAutoApply) return;
+            if (taSuppressBotApply) return;
 
             // Only pick truly-new additions: not seen before AND not a
             // simultaneous re-add of something we just "lost".
@@ -489,6 +666,11 @@ jQuery(async () => {
         enableNativeMultiImport(themeSelect);
 
         renderFavoritesPanel(themeSelect);
+
+        // Per-bot themes: wire UI controls and subscribe to chat changes so a
+        // bot's bound theme is applied automatically when its chat opens.
+        setupPerBotThemes(themeSelect);
+
         console.log(`[${MODULE_NAME}] Loaded successfully`);
     } catch (err) {
         console.error(`[${MODULE_NAME}] Failed to load:`, err);
@@ -527,6 +709,188 @@ function renderFavoritesPanel(themeSelect) {
 }
 
 /* ============================================================
+ * PER-BOT THEMES — UI + AUTO-SWITCH
+ * ============================================================ */
+
+/**
+ * Injects the per-bot controls at the bottom of the inline panel (below the
+ * Favorites list). Done from JS so the buttons appear regardless of which
+ * assist.html version is loaded. No-op if the block already exists.
+ */
+function ensurePerBotBlock() {
+    if (document.getElementById('ta_perbot')) return;
+    const $body = $('#ta_block .ta-inline-body');
+    if ($body.length === 0) return;
+    $body.append(`
+        <div class="ta-inline-favs-title">
+            <i class="fa-solid fa-robot"></i>
+            <span>Bot themes</span>
+        </div>
+        <div id="ta_perbot" class="ta-perbot">
+            <div class="ta-perbot-modes">
+                <div class="ta-mode-btn ta-mode-global" id="ta_mode_global" title="Themes never change automatically">
+                    <i class="fa-solid fa-globe"></i><span>Global</span>
+                </div>
+                <div class="ta-mode-btn ta-mode-perbot" id="ta_mode_perbot" title="Opening a bot's chat applies its linked theme">
+                    <i class="fa-solid fa-robot"></i><span>Per-bot</span>
+                </div>
+            </div>
+            <div class="ta-perbot-row">
+                <div id="ta_perbot_status" class="ta-perbot-status"></div>
+                <div class="ta-perbot-actions">
+                    <div id="ta_bind_btn" class="menu_button ta-btn ta-btn-small" title="Link current theme to this bot">
+                        <i class="fa-solid fa-link"></i>&nbsp;Link
+                    </div>
+                    <div id="ta_unbind_btn" class="menu_button ta-btn ta-btn-small ta-btn-danger" title="Unlink theme from this bot" style="display:none">
+                        <i class="fa-solid fa-link-slash"></i>
+                    </div>
+                </div>
+            </div>
+        </div>`);
+}
+
+/** True while we apply a bot's theme programmatically, so the auto-apply
+ *  MutationObserver doesn't also fire a toast for it. */
+let taSuppressBotApply = false;
+
+/**
+ * Applies the theme bound to the currently active bot, if per-bot mode is on
+ * and a binding exists. If the bot has no binding, the current theme is left
+ * untouched (per design).
+ */
+function applyBotThemeIfNeeded(themeSelect) {
+    if (!isPerBotMode()) return;
+    const bot = getCurrentBot();
+    if (!bot) return;
+    const themeName = getBoundTheme(bot.key);
+    if (!themeName) return;                 // no binding → keep current theme
+    if (!themeOptionExists(themeSelect, themeName)) {
+        console.warn(`[${MODULE_NAME}] Bound theme "${themeName}" for "${bot.label}" no longer exists`);
+        return;
+    }
+    if (themeSelect.value === themeName) return; // already active, nothing to do
+    taSuppressBotApply = true;
+    try {
+        applyThemeByName(themeSelect, themeName);
+        toastr.info(`Theme for "${escapeHtml(bot.label)}": "${escapeHtml(themeName)}"`, DISPLAY_NAME);
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] applyBotThemeIfNeeded failed:`, err);
+    } finally {
+        // Release on the next tick — the observer fires async after the
+        // option/value change.
+        setTimeout(() => { taSuppressBotApply = false; }, 600);
+    }
+}
+
+/**
+ * Renders the per-bot controls in the inline panel: the Global/Per-bot mode
+ * toggle and the current-bot binding row (bind / unbind / status).
+ */
+function renderPerBotPanel(themeSelect) {
+    const $wrap = $('#ta_perbot');
+    if ($wrap.length === 0) return;
+
+    const on = isPerBotMode();
+    $('#ta_mode_global').toggleClass('ta-mode-active', !on);
+    $('#ta_mode_perbot').toggleClass('ta-mode-active', on);
+    $wrap.toggleClass('ta-perbot-on', on);
+
+    const $status = $('#ta_perbot_status');
+    const $bindBtn = $('#ta_bind_btn');
+    const $unbindBtn = $('#ta_unbind_btn');
+
+    const bot = getCurrentBot();
+    if (!bot) {
+        $status.html('<span class="ta-perbot-muted">No character selected</span>');
+        $bindBtn.addClass('ta-disabled');
+        $unbindBtn.hide();
+        return;
+    }
+
+    const bound = getBoundTheme(bot.key);
+    $bindBtn.removeClass('ta-disabled');
+    const current = themeSelect.value || '—';
+
+    if (bound) {
+        $status.html(
+            `<span class="ta-perbot-bot">${escapeHtml(bot.label)}</span>` +
+            ` → <span class="ta-perbot-theme" title="Bound theme">${escapeHtml(bound)}</span>`
+        );
+        $unbindBtn.show();
+    } else {
+        $status.html(
+            `<span class="ta-perbot-bot">${escapeHtml(bot.label)}</span>` +
+            ` → <span class="ta-perbot-muted">not linked</span>`
+        );
+        $unbindBtn.hide();
+    }
+    // The bind button always binds the CURRENTLY active theme.
+    $bindBtn.attr('title', `Link current theme "${current}" to "${bot.label}"`);
+}
+
+/**
+ * Wires per-bot UI events and subscribes to ST chat/character switches.
+ */
+function setupPerBotThemes(themeSelect) {
+    // --- Mode buttons (Global / Per-bot) ---
+    const setMode = (perBot) => {
+        getSettings().perBotMode = perBot;
+        saveSettings();
+        renderPerBotPanel(themeSelect);
+        toastr.info(`Mode: ${perBot ? 'Per-bot' : 'Global'}`, DISPLAY_NAME);
+        // Switching to Per-bot should immediately honor the current bot's
+        // binding (if any).
+        if (perBot) applyBotThemeIfNeeded(themeSelect);
+    };
+    $('#ta_mode_global').on('click', (e) => { e.stopPropagation(); setMode(false); });
+    $('#ta_mode_perbot').on('click', (e) => { e.stopPropagation(); setMode(true); });
+
+    $('#ta_bind_btn').on('click', (e) => {
+        e.stopPropagation();
+        const bot = getCurrentBot();
+        if (!bot) { toastr.warning('Open a character or group chat first', DISPLAY_NAME); return; }
+        const themeName = themeSelect.value;
+        if (!themeName) { toastr.warning('No theme is currently selected', DISPLAY_NAME); return; }
+        bindThemeToBot(bot.key, themeName);
+        renderPerBotPanel(themeSelect);
+        toastr.success(`Linked "${escapeHtml(themeName)}" to "${escapeHtml(bot.label)}"`, DISPLAY_NAME);
+    });
+
+    $('#ta_unbind_btn').on('click', (e) => {
+        e.stopPropagation();
+        const bot = getCurrentBot();
+        if (!bot) return;
+        if (unbindBot(bot.key)) {
+            toastr.info(`Unlinked theme from "${escapeHtml(bot.label)}"`, DISPLAY_NAME);
+        }
+        renderPerBotPanel(themeSelect);
+    });
+
+    // --- React to chat/character switches ---
+    try {
+        const ctx = SillyTavern.getContext();
+        const evt = ctx.eventTypes || ctx.event_types;
+        if (ctx.eventSource && evt) {
+            const onChange = () => {
+                applyBotThemeIfNeeded(themeSelect);
+                // Refresh the panel so the binding status reflects the new bot.
+                renderPerBotPanel(themeSelect);
+            };
+            if (evt.CHAT_CHANGED) ctx.eventSource.on(evt.CHAT_CHANGED, onChange);
+            if (evt.APP_READY) ctx.eventSource.on(evt.APP_READY, onChange);
+        } else {
+            console.warn(`[${MODULE_NAME}] eventSource/eventTypes unavailable — per-bot auto-switch disabled`);
+        }
+    } catch (err) {
+        console.error(`[${MODULE_NAME}] Failed to subscribe to chat events:`, err);
+    }
+
+    // Initial paint + honor binding for whatever is open at load.
+    renderPerBotPanel(themeSelect);
+    applyBotThemeIfNeeded(themeSelect);
+}
+
+/* ============================================================
  * THEME MANAGER
  * ============================================================ */
 function openThemeManager(themeSelect) {
@@ -560,6 +924,17 @@ function openThemeManager(themeSelect) {
                             <input type="checkbox" id="ta_auto_import" ${settings.autoConfirmImport ? 'checked' : ''}>
                             <span>Auto-accept @import</span>
                         </label>
+                    </div>
+                    <div class="ta-perbot-bar" id="ta_mgr_perbot">
+                        <div class="ta-perbot-modes">
+                            <div class="ta-mode-btn" id="ta_mgr_mode_global" title="Themes never change automatically">
+                                <i class="fa-solid fa-globe"></i><span>Global</span>
+                            </div>
+                            <div class="ta-mode-btn" id="ta_mgr_mode_perbot" title="Opening a bot's chat applies its linked theme">
+                                <i class="fa-solid fa-robot"></i><span>Per-bot</span>
+                            </div>
+                        </div>
+                        <div class="ta-perbot-bar-info" id="ta_mgr_perbot_info"></div>
                     </div>
                     <div class="ta-folders-wrap">
                         <div class="ta-folders-header">
@@ -675,6 +1050,11 @@ function openThemeManager(themeSelect) {
         const q = $search.val().toLowerCase().trim();
         $list.empty();
 
+        // Current bot + the theme bound to it (if any), for the per-theme
+        // link button. Recomputed each render so it tracks chat switches.
+        const curBot = getCurrentBot();
+        const curBotTheme = curBot ? getBoundTheme(curBot.key) : null;
+
         // Apply folder filter first (if any).
         let pool = allThemes;
         if (activeFolderId) {
@@ -702,12 +1082,21 @@ function openThemeManager(themeSelect) {
             const isCurrent = name === currentTheme;
             const isFav = favs.has(name);
             const inFolders = foldersOfTheme(name).length;
+            const linkedToBot = curBot && curBotTheme === name;
             const safeName = escapeHtml(name);
+            const linkTitle = curBot
+                ? (linkedToBot
+                    ? `Linked to "${curBot.label}" — click to unlink`
+                    : `Link to "${curBot.label}"`)
+                : 'Open a chat to link this theme to a bot';
             const row = $(`
                 <div class="ta-theme-item ${isCurrent ? 'ta-theme-current' : ''}">
                     <input type="checkbox" class="ta-check">
                     <span class="ta-star ${isFav ? 'ta-star-active' : ''}" title="Toggle favorite"></span>
                     <span class="ta-theme-name">${safeName}</span>
+                    <span class="ta-theme-link ${linkedToBot ? 'ta-theme-link-active' : ''} ${curBot ? '' : 'ta-disabled'}" title="${escapeHtml(linkTitle)}">
+                        <i class="fa-solid ${linkedToBot ? 'fa-link' : 'fa-link'}"></i>
+                    </span>
                     <span class="ta-theme-folders ${inFolders ? 'ta-theme-folders-active' : ''}" title="Manage folders">
                         <i class="fa-solid fa-folder-plus"></i>${inFolders ? `<span class="ta-theme-folders-count">${inFolders}</span>` : ''}
                     </span>
@@ -725,6 +1114,21 @@ function openThemeManager(themeSelect) {
             row.find('.ta-theme-name').on('click', () => {
                 applyThemeByName(themeSelect, name);
                 toastr.success(`Applied: "${escapeHtml(name)}"`, DISPLAY_NAME);
+            });
+            row.find('.ta-theme-link').on('click', (e) => {
+                e.stopPropagation();
+                const bot = getCurrentBot();
+                if (!bot) { toastr.warning('Open a character or group chat first', DISPLAY_NAME); return; }
+                if (getBoundTheme(bot.key) === name) {
+                    unbindBot(bot.key);
+                    toastr.info(`Unlinked "${escapeHtml(name)}" from "${escapeHtml(bot.label)}"`, DISPLAY_NAME);
+                } else {
+                    bindThemeToBot(bot.key, name);
+                    toastr.success(`Linked "${escapeHtml(name)}" to "${escapeHtml(bot.label)}"`, DISPLAY_NAME);
+                }
+                renderList();
+                renderMgrPerBot();
+                renderPerBotPanel(themeSelect);
             });
             row.find('.ta-theme-folders').on('click', (e) => {
                 e.stopPropagation();
@@ -1048,6 +1452,43 @@ function openThemeManager(themeSelect) {
         renderList();
     });
 
+    /* ---------- Per-bot bar inside the manager ---------- */
+    function renderMgrPerBot() {
+        const on = isPerBotMode();
+        overlay.find('#ta_mgr_mode_global').toggleClass('ta-mode-active', !on);
+        overlay.find('#ta_mgr_mode_perbot').toggleClass('ta-mode-active', on);
+        const bot = getCurrentBot();
+        const $info = overlay.find('#ta_mgr_perbot_info');
+        if (!bot) {
+            $info.html('<span class="ta-perbot-muted">No character selected — open a chat to link themes</span>');
+            return;
+        }
+        const bound = getBoundTheme(bot.key);
+        if (bound) {
+            $info.html(
+                `<i class="fa-solid fa-link"></i> <span class="ta-perbot-bot">${escapeHtml(bot.label)}</span>` +
+                ` → <span class="ta-perbot-theme">${escapeHtml(bound)}</span>`
+            );
+        } else {
+            $info.html(
+                `<span class="ta-perbot-bot">${escapeHtml(bot.label)}</span>` +
+                ` → <span class="ta-perbot-muted">not linked (use the <i class="fa-solid fa-link"></i> on a theme)</span>`
+            );
+        }
+    }
+    overlay.find('#ta_mgr_mode_global').on('click', () => {
+        settings.perBotMode = false; saveSettings();
+        renderMgrPerBot(); renderList(); renderPerBotPanel(themeSelect);
+        toastr.info('Mode: Global', DISPLAY_NAME);
+    });
+    overlay.find('#ta_mgr_mode_perbot').on('click', () => {
+        settings.perBotMode = true; saveSettings();
+        renderMgrPerBot(); renderList(); renderPerBotPanel(themeSelect);
+        toastr.info('Mode: Per-bot', DISPLAY_NAME);
+        applyBotThemeIfNeeded(themeSelect);
+    });
+
+    renderMgrPerBot();
     renderFolders();
     renderList();
 }
@@ -1205,6 +1646,7 @@ async function bulkDeleteThemes(names, themeSelect) {
             const fi = favs.indexOf(name);
             if (fi !== -1) { favs.splice(fi, 1); saveSettings(); }
             purgeThemeFromFolders(name);
+            purgeThemeFromBots(name);
             await sleep(150);
             ok++;
         } catch (err) {

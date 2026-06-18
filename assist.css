@@ -118,6 +118,94 @@
 
 .ta-inline-favs-title i { color: var(--SmartThemeEmColor, var(--SmartThemeQuoteColor, var(--ta-accent))); }
 
+/* ============ PER-BOT THEMES ============ */
+.ta-perbot {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--ta-border);
+    border-radius: var(--ta-radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* Mode buttons (Global / Per-bot) — rounded pill tabs */
+.ta-perbot-modes {
+    display: flex;
+    gap: 6px;
+}
+
+.ta-mode-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--ta-border);
+    background: var(--ta-hover);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85em;
+    font-weight: 600;
+    opacity: 0.7;
+    transition: all 0.18s ease;
+}
+
+.ta-mode-btn i { font-size: 0.95em; opacity: 0.8; }
+
+.ta-mode-btn:hover {
+    opacity: 1;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+.ta-mode-btn.ta-mode-active {
+    opacity: 1;
+    color: #fff;
+    background: var(--ta-accent);
+    border-color: var(--ta-accent);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ta-mode-btn.ta-mode-active i { opacity: 1; color: #fff; }
+
+/* Binding row */
+.ta-perbot-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.4;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+}
+
+.ta-perbot.ta-perbot-on .ta-perbot-row {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.ta-perbot-status {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.82em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ta-perbot-bot { font-weight: 600; }
+.ta-perbot-theme { color: var(--ta-accent); }
+.ta-perbot-muted { opacity: 0.5; font-style: italic; }
+
+.ta-perbot-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+
+.ta-perbot-actions .ta-btn.ta-disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
 /* ============ FAVORITES ============ */
 .ta-fav-list {
     display: flex;
@@ -603,6 +691,58 @@
     min-width: 14px;
     text-align: center;
 }
+
+/* Per-theme "link to current bot" icon */
+.ta-theme-link {
+    opacity: 0.35;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.85em;
+}
+
+.ta-theme-link:hover {
+    opacity: 1;
+    background: var(--ta-hover);
+    color: var(--ta-accent);
+}
+
+.ta-theme-link-active {
+    opacity: 1;
+    color: var(--ta-accent);
+    background: color-mix(in srgb, var(--ta-accent) 18%, transparent);
+}
+
+.ta-theme-link.ta-disabled {
+    opacity: 0.15;
+    pointer-events: none;
+}
+
+/* Per-bot bar inside the Theme Manager */
+.ta-perbot-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    margin-bottom: 4px;
+    border: 1px solid var(--ta-border);
+    border-radius: var(--ta-radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.ta-perbot-bar .ta-perbot-modes { width: 100%; }
+
+.ta-perbot-bar-info {
+    font-size: 0.82em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ta-perbot-bar-info i { color: var(--ta-accent); }
 
 /* ============ SECONDARY POPUP (folder editor / pickers) ============
    Uses the same structure and classes (.ta-popup-*) as the main Theme
