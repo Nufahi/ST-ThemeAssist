@@ -35,6 +35,37 @@ function resolveExtPath() {
 const extPath = resolveExtPath();
 
 /* ============================================================
+ * MANAGER SKINS (palette)
+ * The Theme Manager popup normally inherits its colors from the active
+ * SillyTavern theme ('adaptive'). Some ST themes use a transparent tint,
+ * which makes the manager hard to read. These fixed skins guarantee a
+ * solid, readable surface and let the user pick a look they like.
+ * Each skin is just a swatch (for the picker UI) + a CSS attribute hook
+ * `[data-ta-skin="<id>"]` defined in assist.css.
+ * ============================================================ */
+const TA_SKINS = [
+    { id: 'adaptive', label: 'Adaptive', swatch: 'linear-gradient(135deg,#6a6aff,#b86adf)' },
+    { id: 'amoled',   label: 'AMOLED',   swatch: '#000000' },
+    { id: 'dark',     label: 'Dark',     swatch: '#1c1f26' },
+    { id: 'blue',     label: 'Blue',     swatch: '#16273f' },
+    { id: 'pink',     label: 'Pink',     swatch: '#3a1730' },
+    { id: 'dracula',  label: 'Dracula',  swatch: '#282a36' },
+    { id: 'nord',     label: 'Nord',     swatch: '#2e3440' },
+    { id: 'forest',   label: 'Forest',   swatch: '#16261c' },
+    { id: 'light',    label: 'Light',    swatch: '#f3f3f6' },
+];
+const TA_SKIN_IDS = TA_SKINS.map(s => s.id);
+
+/** Apply the saved manager skin to a popup overlay root element. */
+function applyMgrSkin(rootEl) {
+    if (!rootEl) return;
+    const el = rootEl.jquery ? rootEl[0] : rootEl;
+    if (!el) return;
+    const skin = getSettings().mgrSkin || 'adaptive';
+    el.setAttribute('data-ta-skin', skin);
+}
+
+/* ============================================================
  * UTILS
  * ============================================================ */
 function escapeHtml(str) {
@@ -115,6 +146,12 @@ function getSettings() {
     if (typeof s.perBotMode !== 'boolean') s.perBotMode = false;
     // Whether the Folders section in the Theme Manager is collapsed.
     if (typeof s.foldersCollapsed !== 'boolean') s.foldersCollapsed = false;
+    // Visual skin of the Theme Manager popup itself. 'adaptive' follows the
+    // SillyTavern theme (default), the rest are fixed, always-readable skins
+    // so the manager never becomes transparent/unreadable.
+    if (typeof s.mgrSkin !== 'string' || !TA_SKIN_IDS.includes(s.mgrSkin)) {
+        s.mgrSkin = 'adaptive';
+    }
     if (!s.botThemes || typeof s.botThemes !== 'object' || Array.isArray(s.botThemes)) {
         s.botThemes = {};
     } else {
@@ -927,6 +964,13 @@ function openThemeManager(themeSelect) {
                             <span>Auto-accept @import</span>
                         </label>
                     </div>
+                    <div class="ta-skin-bar" id="ta_skin_bar">
+                        <div class="ta-skin-title" title="Pick how the Theme Manager itself looks. 'Adaptive' follows your SillyTavern theme; the rest are always-readable.">
+                            <i class="fa-solid fa-palette"></i>
+                            <span>Manager skin</span>
+                        </div>
+                        <div class="ta-skin-swatches" id="ta_skin_swatches"></div>
+                    </div>
                     <div class="ta-perbot-bar" id="ta_mgr_perbot">
                         <div class="ta-perbot-modes">
                             <div class="ta-mode-btn" id="ta_mgr_mode_global" title="Themes never change automatically">
@@ -996,6 +1040,7 @@ function openThemeManager(themeSelect) {
         </div>
     `);
     $('body').append(overlay);
+    applyMgrSkin(overlay);
 
     const $list = overlay.find('#ta_theme_list');
     const $search = overlay.find('#ta_search');
@@ -1178,6 +1223,7 @@ function openThemeManager(themeSelect) {
             </div>
         `);
         $('body').append(editor);
+        applyMgrSkin(editor);
         const $input = editor.find('input[type=text]');
         setTimeout(() => { try { $input.trigger('focus').trigger('select'); } catch (_) {} }, 30);
         const close = () => editor.remove();
@@ -1234,6 +1280,7 @@ function openThemeManager(themeSelect) {
             </div>
         `);
         $('body').append(picker);
+        applyMgrSkin(picker);
         const $checks = picker.find('#ta_folder_checks');
 
         function renderChecks() {
@@ -1315,6 +1362,7 @@ function openThemeManager(themeSelect) {
             </div>
         `);
         $('body').append(picker);
+        applyMgrSkin(picker);
         const $checks = picker.find('#ta_bulk_folders');
 
         function draw() {
@@ -1511,6 +1559,34 @@ function openThemeManager(themeSelect) {
         toastr.info('Mode: Per-bot', DISPLAY_NAME);
         applyBotThemeIfNeeded(themeSelect);
     });
+
+    /* ---------- Manager skin (palette) ---------- */
+    const $skinSwatches = overlay.find('#ta_skin_swatches');
+    function renderSkinSwatches() {
+        $skinSwatches.empty();
+        const cur = getSettings().mgrSkin || 'adaptive';
+        for (const skin of TA_SKINS) {
+            const active = skin.id === cur;
+            const sw = $(`
+                <div class="ta-skin-swatch ${active ? 'ta-skin-active' : ''}" title="${escapeHtml(skin.label)}" data-skin="${skin.id}">
+                    <span class="ta-skin-dot" style="background:${skin.swatch}"></span>
+                    <span class="ta-skin-label">${escapeHtml(skin.label)}</span>
+                </div>
+            `);
+            sw.on('click', () => {
+                const s = getSettings();
+                s.mgrSkin = skin.id;
+                saveSettings();
+                // Re-skin the main manager and any stacked extra popups live.
+                applyMgrSkin(overlay);
+                document.querySelectorAll('.ta-popup-overlay-extra')
+                    .forEach(el => el.setAttribute('data-ta-skin', skin.id));
+                renderSkinSwatches();
+            });
+            $skinSwatches.append(sw);
+        }
+    }
+    renderSkinSwatches();
 
     renderMgrPerBot();
     renderFolders();
@@ -1936,6 +2012,7 @@ async function importThemeWithReplacePrompt(jsonFile, themeSelect) {
             </div>
         `);
         $('body').append(overlay);
+        applyMgrSkin(overlay);
         const close = () => overlay.remove();
         overlay.find('.ta-close-btn, [data-act=cancel]').on('click', () => {
             close();

@@ -10,6 +10,78 @@
     --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
 }
 
+/* ============ MANAGER SKINS (palette) ============
+   Applied via data-ta-skin="<id>" on the popup overlay root. Each skin
+   overrides the --ta-* vars so the manager stays readable regardless of
+   the active SillyTavern theme. 'adaptive' has no override — it inherits
+   the ST theme vars defined on :root above. */
+[data-ta-skin="amoled"] {
+    --ta-bg: #000000;
+    --ta-border: rgba(255, 255, 255, 0.14);
+    --ta-accent: #7c5cff;
+    --ta-body: #eaeaf0;
+    --ta-hover: rgba(255, 255, 255, 0.07);
+    --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.85);
+}
+[data-ta-skin="dark"] {
+    --ta-bg: #1c1f26;
+    --ta-border: rgba(255, 255, 255, 0.12);
+    --ta-accent: #8a9bff;
+    --ta-body: #e6e8ee;
+    --ta-hover: rgba(255, 255, 255, 0.06);
+    --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+}
+[data-ta-skin="blue"] {
+    --ta-bg: #11253f;
+    --ta-border: rgba(120, 170, 255, 0.22);
+    --ta-accent: #4ea8ff;
+    --ta-body: #dceaff;
+    --ta-hover: rgba(120, 170, 255, 0.10);
+    --ta-shadow: 0 10px 40px rgba(0, 10, 30, 0.6);
+}
+[data-ta-skin="pink"] {
+    --ta-bg: #2c1326;
+    --ta-border: rgba(255, 140, 200, 0.24);
+    --ta-accent: #ff6fb5;
+    --ta-body: #ffe3f1;
+    --ta-hover: rgba(255, 140, 200, 0.10);
+    --ta-shadow: 0 10px 40px rgba(40, 0, 25, 0.6);
+}
+[data-ta-skin="dracula"] {
+    --ta-bg: #282a36;
+    --ta-border: rgba(189, 147, 249, 0.28);
+    --ta-accent: #bd93f9;
+    --ta-body: #f8f8f2;
+    --ta-hover: rgba(189, 147, 249, 0.12);
+    --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+[data-ta-skin="nord"] {
+    --ta-bg: #2e3440;
+    --ta-border: rgba(136, 192, 208, 0.26);
+    --ta-accent: #88c0d0;
+    --ta-body: #eceff4;
+    --ta-hover: rgba(136, 192, 208, 0.12);
+    --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+}
+[data-ta-skin="forest"] {
+    --ta-bg: #14241a;
+    --ta-border: rgba(120, 220, 150, 0.22);
+    --ta-accent: #5fd38a;
+    --ta-body: #dff5e6;
+    --ta-hover: rgba(120, 220, 150, 0.10);
+    --ta-shadow: 0 10px 40px rgba(0, 20, 8, 0.6);
+}
+[data-ta-skin="light"] {
+    --ta-bg: #f3f3f6;
+    --ta-border: rgba(0, 0, 0, 0.14);
+    --ta-accent: #5a5af0;
+    --ta-body: #1c1c22;
+    --ta-hover: rgba(0, 0, 0, 0.05);
+    --ta-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+/* Light skin needs darker text on its accent pills/buttons stay readable;
+   active mode buttons already force #fff which works on the indigo accent. */
+
 /* ============ INLINE BLOCK (collapsible) ============ */
 .ta-inline-block {
     margin: 8px 0 10px;
@@ -404,6 +476,75 @@
     padding: 2px 0;
     opacity: 0.7;
     font-size: 0.9em;
+}
+
+/* ============ MANAGER SKIN PICKER ============ */
+.ta-skin-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border: 1px solid var(--ta-border);
+    border-radius: var(--ta-radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.ta-skin-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85em;
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+.ta-skin-title i { color: var(--ta-accent); }
+
+.ta-skin-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.ta-skin-swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 11px 5px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--ta-border);
+    background: var(--ta-hover);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.8em;
+    font-weight: 600;
+    opacity: 0.78;
+    transition: all 0.16s ease;
+}
+
+.ta-skin-swatch:hover {
+    opacity: 1;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+.ta-skin-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.ta-skin-label { white-space: nowrap; }
+
+.ta-skin-swatch.ta-skin-active {
+    opacity: 1;
+    border-color: var(--ta-accent);
+    background: color-mix(in srgb, var(--ta-accent) 20%, transparent);
+    box-shadow: 0 0 0 1px var(--ta-accent) inset;
 }
 
 /* ============ THEME LIST ============ */
