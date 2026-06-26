@@ -44,7 +44,7 @@ const extPath = resolveExtPath();
  * `[data-ta-skin="<id>"]` defined in assist.css.
  * ============================================================ */
 const TA_SKINS = [
-    { id: 'adaptive', label: 'Adaptive', swatch: 'linear-gradient(135deg,#6a6aff,#b86adf)' },
+    { id: 'adaptive', label: 'Adaptive', swatch: 'var(--ta-accent)' },
     { id: 'amoled',   label: 'AMOLED',   swatch: '#000000' },
     { id: 'dark',     label: 'Dark',     swatch: '#1c1f26' },
     { id: 'blue',     label: 'Blue',     swatch: '#16273f' },
@@ -152,6 +152,8 @@ function getSettings() {
     if (typeof s.mgrSkin !== 'string' || !TA_SKIN_IDS.includes(s.mgrSkin)) {
         s.mgrSkin = 'adaptive';
     }
+    // Whether the "Manager skin" palette section is collapsed (default: yes).
+    if (typeof s.skinCollapsed !== 'boolean') s.skinCollapsed = true;
     if (!s.botThemes || typeof s.botThemes !== 'object' || Array.isArray(s.botThemes)) {
         s.botThemes = {};
     } else {
@@ -965,11 +967,15 @@ function openThemeManager(themeSelect) {
                         </label>
                     </div>
                     <div class="ta-skin-bar" id="ta_skin_bar">
-                        <div class="ta-skin-title" title="Pick how the Theme Manager itself looks. 'Adaptive' follows your SillyTavern theme; the rest are always-readable.">
+                        <div class="ta-skin-title" id="ta_skin_toggle" title="Pick how the Theme Manager itself looks. 'Adaptive' follows your SillyTavern theme; the rest are always-readable.">
+                            <i class="fa-solid fa-chevron-down ta-skin-chevron"></i>
                             <i class="fa-solid fa-palette"></i>
                             <span>Manager skin</span>
+                            <span class="ta-skin-current" id="ta_skin_current"></span>
                         </div>
-                        <div class="ta-skin-swatches" id="ta_skin_swatches"></div>
+                        <div class="ta-skin-collapsible">
+                            <div class="ta-skin-swatches" id="ta_skin_swatches"></div>
+                        </div>
                     </div>
                     <div class="ta-perbot-bar" id="ta_mgr_perbot">
                         <div class="ta-perbot-modes">
@@ -1561,15 +1567,36 @@ function openThemeManager(themeSelect) {
     });
 
     /* ---------- Manager skin (palette) ---------- */
+    const $skinBar = overlay.find('#ta_skin_bar');
     const $skinSwatches = overlay.find('#ta_skin_swatches');
+    const $skinCurrent = overlay.find('#ta_skin_current');
+
+    function applySkinCollapsed() {
+        $skinBar.toggleClass('ta-skin-collapsed', getSettings().skinCollapsed === true);
+    }
+    overlay.find('#ta_skin_toggle').on('click', () => {
+        const s = getSettings();
+        s.skinCollapsed = !s.skinCollapsed;
+        saveSettings();
+        applySkinCollapsed();
+    });
+
     function renderSkinSwatches() {
         $skinSwatches.empty();
         const cur = getSettings().mgrSkin || 'adaptive';
+        const curLabel = (TA_SKINS.find(s => s.id === cur) || {}).label || cur;
+        $skinCurrent.text(curLabel);
         for (const skin of TA_SKINS) {
             const active = skin.id === cur;
+            // Adaptive's dot should reflect the live theme accent, so it uses
+            // a CSS class (tied to --SmartThemeQuoteColor) instead of an inline
+            // color that would otherwise follow the selected skin's accent.
+            const dot = skin.id === 'adaptive'
+                ? '<span class="ta-skin-dot ta-skin-dot-adaptive"></span>'
+                : `<span class="ta-skin-dot" style="background:${skin.swatch}"></span>`;
             const sw = $(`
                 <div class="ta-skin-swatch ${active ? 'ta-skin-active' : ''}" title="${escapeHtml(skin.label)}" data-skin="${skin.id}">
-                    <span class="ta-skin-dot" style="background:${skin.swatch}"></span>
+                    ${dot}
                     <span class="ta-skin-label">${escapeHtml(skin.label)}</span>
                 </div>
             `);
@@ -1587,6 +1614,7 @@ function openThemeManager(themeSelect) {
         }
     }
     renderSkinSwatches();
+    applySkinCollapsed();
 
     renderMgrPerBot();
     renderFolders();

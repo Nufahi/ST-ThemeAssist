@@ -415,6 +415,9 @@
 
 .ta-footer-buttons { display: flex; gap: 8px; }
 
+/* Keep footer button labels on a single line ("Add to folder" etc.) */
+.ta-popup-footer .ta-btn { white-space: nowrap; }
+
 /* ============ SEARCH ============ */
 .ta-search-wrap { position: relative; margin: 6px 0 14px; }
 
@@ -482,13 +485,16 @@
 .ta-skin-bar {
     display: flex;
     flex-direction: column;
-    gap: 10px;
     padding: 10px 12px;
     margin-bottom: 12px;
     border: 1px solid var(--ta-border);
     border-radius: var(--ta-radius-sm);
     background: rgba(255, 255, 255, 0.02);
 }
+
+.ta-skin-bar .ta-skin-collapsible { margin-top: 10px; }
+
+.ta-skin-bar.ta-skin-collapsed .ta-skin-collapsible { margin-top: 0; }
 
 .ta-skin-title {
     display: flex;
@@ -497,9 +503,36 @@
     font-size: 0.85em;
     font-weight: 600;
     opacity: 0.85;
+    cursor: pointer;
+    user-select: none;
 }
 
 .ta-skin-title i { color: var(--ta-accent); }
+
+.ta-skin-chevron { transition: transform 0.18s ease; }
+
+.ta-skin-current {
+    margin-left: auto;
+    font-weight: 500;
+    opacity: 0.65;
+    font-size: 0.95em;
+}
+
+/* Collapsible body — animated open/close */
+.ta-skin-collapsible {
+    overflow: hidden;
+    max-height: 240px;
+    transition: max-height 0.22s ease, opacity 0.18s ease, margin 0.18s ease;
+}
+
+.ta-skin-bar.ta-skin-collapsed .ta-skin-collapsible {
+    max-height: 0;
+    opacity: 0;
+}
+
+.ta-skin-bar.ta-skin-collapsed .ta-skin-chevron {
+    transform: rotate(-90deg);
+}
 
 .ta-skin-swatches {
     display: flex;
@@ -536,6 +569,12 @@
     flex-shrink: 0;
     border: 1px solid rgba(255, 255, 255, 0.25);
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Adaptive dot always shows the LIVE SillyTavern accent, independent of
+   the currently selected manager skin. */
+.ta-skin-dot-adaptive {
+    background: var(--SmartThemeQuoteColor, #9a9aff);
 }
 
 .ta-skin-label { white-space: nowrap; }
