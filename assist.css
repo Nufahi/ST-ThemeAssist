@@ -620,6 +620,7 @@
 
 .ta-theme-name {
     flex: 1;
+    min-width: 0; /* allow the name to truncate instead of pushing siblings out */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1267,9 +1268,12 @@
 
 /* Phones */
 @media (max-width: 480px) {
-    /* Save horizontal room for the name + action icons on tiny screens;
-       the exact date is still in the badge's title tooltip. */
-    .ta-theme-date { display: none; }
+    /* Keep the date visible on phones, just more compact, and make sure it
+       never gets squeezed to zero width while the name truncates instead. */
+    .ta-theme-date {
+        font-size: 0.66em;
+        opacity: 0.55;
+    }
 
     #ta_block .ta-inline-header {
         padding: 6px 8px;
