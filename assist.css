@@ -867,6 +867,19 @@
 .ta-sort-select:focus { border-color: var(--ta-accent); }
 
 /* ============ THEME ITEM: folder chip ============ */
+/* "Date added" badge (YYYY-MM-DD). Read-only, non-interactive. */
+.ta-theme-date {
+    flex: 0 0 auto;
+    font-size: 0.72em;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.45;
+    white-space: nowrap;
+    font-family: var(--monoFontFamily, ui-monospace, monospace);
+    user-select: none;
+}
+
+.ta-theme-item:hover .ta-theme-date { opacity: 0.7; }
+
 .ta-theme-folders {
     opacity: 0.35;
     cursor: pointer;
@@ -1254,6 +1267,10 @@
 
 /* Phones */
 @media (max-width: 480px) {
+    /* Save horizontal room for the name + action icons on tiny screens;
+       the exact date is still in the badge's title tooltip. */
+    .ta-theme-date { display: none; }
+
     #ta_block .ta-inline-header {
         padding: 6px 8px;
         gap: 6px;

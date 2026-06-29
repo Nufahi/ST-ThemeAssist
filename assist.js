@@ -256,6 +256,24 @@ function getThemeAddedAt(name) {
     return getSettings().themeAddedAt[name] || 0;
 }
 
+/**
+ * Human-readable add date for a theme as YYYY-MM-DD (local time).
+ * Returns '' when the time is unknown OR is the shared baseline (themes that
+ * predate this feature), since we can't honestly date those.
+ */
+function getThemeAddedDateLabel(name) {
+    const s = getSettings();
+    const t = s.themeAddedAt[name] || 0;
+    if (!t) return '';
+    if (s.themeAddedBaseline && t === s.themeAddedBaseline) return '';
+    const d = new Date(t);
+    if (isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
 /** Drops a theme's stored add time (call when the theme is deleted). */
 function purgeThemeTimestamp(name) {
     const s = getSettings();
@@ -1239,11 +1257,16 @@ function openThemeManager(themeSelect) {
                     ? `Linked to "${curBot.label}" — click to unlink`
                     : `Link to "${curBot.label}"`)
                 : 'Open a chat to link this theme to a bot';
+            const addedDate = getThemeAddedDateLabel(name);
+            const dateBadge = addedDate
+                ? `<span class="ta-theme-date" title="Date added">${addedDate}</span>`
+                : '';
             const row = $(`
                 <div class="ta-theme-item ${isCurrent ? 'ta-theme-current' : ''}">
                     <input type="checkbox" class="ta-check">
                     <span class="ta-star ${isFav ? 'ta-star-active' : ''}" title="Toggle favorite"></span>
                     <span class="ta-theme-name">${safeName}</span>
+                    ${dateBadge}
                     <span class="ta-theme-link ${linkedToBot ? 'ta-theme-link-active' : ''} ${curBot ? '' : 'ta-disabled'}" title="${escapeHtml(linkTitle)}">
                         <i class="fa-solid ${linkedToBot ? 'fa-link' : 'fa-link'}"></i>
                     </span>
