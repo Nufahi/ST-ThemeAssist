@@ -86,6 +86,39 @@ function sleep(ms) {
  *  apply every single imported theme one by one. */
 let taSuppressAutoApply = false;
 
+/**
+ * Controller for the @import auto-confirm observer. The observer watches the
+ * whole <body> subtree, which is expensive to keep running all the time (it
+ * fires on every chat message, stream token, tooltip, etc.). The @import
+ * warning popup only ever appears WHILE a theme is being imported, so we keep
+ * the observer off in the background and only switch it on around imports.
+ * The init code installs the real start/stop functions here.
+ */
+const taAutoConfirm = {
+    _start: null,
+    _stop: null,
+    _refs: 0,
+    /** Begin watching for the @import popup (ref-counted, nestable). */
+    begin() {
+        if (this._refs === 0 && typeof this._start === 'function') {
+            try { this._start(); } catch (_) { /* not ready */ }
+        }
+        this._refs++;
+    },
+    /** Stop watching once all active imports have ended. */
+    end() {
+        this._refs = Math.max(0, this._refs - 1);
+        if (this._refs === 0 && typeof this._stop === 'function') {
+            // Let any trailing popup mutation settle before disconnecting.
+            setTimeout(() => {
+                if (this._refs === 0 && typeof this._stop === 'function') {
+                    try { this._stop(); } catch (_) { /* already gone */ }
+                }
+            }, 1500);
+        }
+    },
+};
+
 /** Returns true if #themes currently has an option with this value. */
 function themeOptionExists(themeSelect, name) {
     return Array.from(themeSelect.options).some(o => o.value === name);
@@ -242,13 +275,22 @@ function seedThemeTimestamps(existingNames) {
     saveSettings();
 }
 
-/** Records "now" as the add time for a theme, unless already known. */
-function markThemeAdded(name, when = Date.now()) {
-    if (!name) return;
+/**
+ * Records "now" as the add time for one or more themes, saving settings at
+ * most once. First-seen-wins: existing timestamps are never overwritten. Used
+ * in the hot #themes observer where a single import (e.g. a zip) can add
+ * dozens of <option>s in one mutation batch.
+ */
+function markThemesAdded(names, when = Date.now()) {
+    if (!names || names.length === 0) return;
     const s = getSettings();
-    if (name in s.themeAddedAt) return; // first-seen wins; don't overwrite
-    s.themeAddedAt[name] = when;
-    saveSettings();
+    let changed = false;
+    for (const name of names) {
+        if (!name || name in s.themeAddedAt) continue; // first-seen wins
+        s.themeAddedAt[name] = when;
+        changed = true;
+    }
+    if (changed) saveSettings();
 }
 
 /** Returns the recorded add time for a theme, or 0 if unknown. */
@@ -456,8 +498,13 @@ function applyThemeByName(themeSelect, name) {
     // The inline block may not be mounted yet during very early init.
     const lastApplied = document.getElementById('ta_last_applied');
     if (lastApplied) lastApplied.textContent = name;
-    // Keep the per-bot bind button's "current theme" hint in sync.
-    if (typeof renderPerBotPanel === 'function' && document.getElementById('ta_perbot')) {
+    // Keep the per-bot bind button's "current theme" hint in sync. Skip during
+    // bulk import / bot auto-apply: those rebuild the panel themselves once at
+    // the end, so re-rendering on every single applyThemeByName() in a loop is
+    // wasted DOM work.
+    if (!taSuppressAutoApply && !taSuppressBotApply
+        && typeof renderPerBotPanel === 'function'
+        && document.getElementById('ta_perbot')) {
         try { renderPerBotPanel(themeSelect); } catch (_) { /* panel not ready */ }
     }
 }
@@ -715,11 +762,21 @@ jQuery(async () => {
             }
         };
 
-        if (getSettings().autoConfirmImport) startAutoConfirmObserver();
+        // Expose start/stop to the import flow. The observer is NO LONGER kept
+        // running in the background (it watched the whole <body> subtree, which
+        // is costly during chat streaming). Instead taAutoConfirm.begin()/end()
+        // switch it on only for the duration of an import. The start function
+        // itself still respects the user's autoConfirmImport setting.
+        taAutoConfirm._start = () => {
+            if (!getSettings().autoConfirmImport) return;
+            startAutoConfirmObserver();
+        };
+        taAutoConfirm._stop = stopAutoConfirmObserver;
 
+        // The settings toggle no longer needs to start the observer eagerly —
+        // turning it off mid-import should still stop it immediately though.
         document.addEventListener('ta_auto_import_changed', (e) => {
-            if (e.detail && e.detail.enabled) startAutoConfirmObserver();
-            else stopAutoConfirmObserver();
+            if (!(e.detail && e.detail.enabled)) stopAutoConfirmObserver();
         });
 
         // Auto-apply new themes on import.
@@ -768,13 +825,12 @@ jQuery(async () => {
 
             // Record a real "date added" timestamp for genuinely-new themes:
             // added in this batch and NOT a simultaneous re-add of something we
-            // just removed (those are re-renders, not imports). markThemeAdded()
-            // is first-seen-wins, so re-renders of known themes are harmless.
-            // We do this regardless of `autoApplyArmed` so timestamps are still
-            // captured for imports that land during the initial settle window.
-            for (const name of addedInBatch) {
-                if (!removedInBatch.has(name)) markThemeAdded(name);
-            }
+            // just removed (those are re-renders, not imports). Batched so a
+            // many-theme import saves settings only once. First-seen-wins, so
+            // re-renders of known themes are harmless. Done regardless of
+            // `autoApplyArmed` so timestamps are captured during the initial
+            // settle window too.
+            markThemesAdded(addedInBatch.filter(name => !removedInBatch.has(name)));
 
             if (!autoApplyArmed) return;
             // During a bulk import our import flow applies the LAST theme
@@ -1970,6 +2026,7 @@ async function runBulkImport(files, themeSelect) {
     toastr.info(`Processing ${jsonFiles.length} file(s)...`, DISPLAY_NAME);
 
     taSuppressAutoApply = true;
+    taAutoConfirm.begin(); // watch for @import popups only during this import
     let imported = 0, skipped = 0;
     let lastImportedName = null;
     try {
@@ -1990,6 +2047,7 @@ async function runBulkImport(files, themeSelect) {
         }
     } finally {
         taSuppressAutoApply = false;
+        taAutoConfirm.end();
     }
 
     if (lastImportedName && themeOptionExists(themeSelect, lastImportedName)) {
@@ -2030,7 +2088,16 @@ function enableNativeMultiImport(themeSelect) {
         const files = Array.from(fileInput.files || []);
         const needsIntercept = files.length > 1
             || files.some(f => f.name.toLowerCase().endsWith('.zip'));
-        if (!needsIntercept) return; // single .json → ST handles it natively
+        if (!needsIntercept) {
+            // Single .json → ST handles it natively. Open a brief window for
+            // the @import auto-confirm observer to catch ST's warning popup,
+            // then let it switch back off.
+            if (files.length === 1) {
+                taAutoConfirm.begin();
+                setTimeout(() => taAutoConfirm.end(), 8000);
+            }
+            return;
+        }
         // Stop ST's own handler (it only reads files[0] and would double-import).
         e.stopImmediatePropagation();
         e.preventDefault();
