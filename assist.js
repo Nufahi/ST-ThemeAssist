@@ -135,10 +135,29 @@ function getSettings() {
     // any number of folders at the same time.
     if (!Array.isArray(s.folders)) s.folders = [];
     // Sort mode for the theme list: 'alpha' (A→Z, favorites first) or 'date'
-    // (most recently added first, based on <option> order in #themes).
+    // (most recently added first, based on real timestamps in `themeAddedAt`).
     if (typeof s.sortMode !== 'string' || !['alpha', 'date'].includes(s.sortMode)) {
         s.sortMode = 'alpha';
     }
+    // Real "date added" timestamps, keyed by theme name → epoch ms. The order
+    // of <option>s in #themes is alphabetical (ST sorts on disk by filename),
+    // so it can NOT be used to infer when a theme was added. Instead we record
+    // a timestamp the first time we ever see a theme. Themes that existed
+    // before this feature get a single shared baseline time so they all sort
+    // below anything imported afterwards, while keeping a stable order among
+    // themselves (alphabetical, handled by the sort comparator).
+    if (!s.themeAddedAt || typeof s.themeAddedAt !== 'object' || Array.isArray(s.themeAddedAt)) {
+        s.themeAddedAt = {};
+    } else {
+        for (const k of Object.keys(s.themeAddedAt)) {
+            if (typeof s.themeAddedAt[k] !== 'number' || !isFinite(s.themeAddedAt[k])) {
+                delete s.themeAddedAt[k];
+            }
+        }
+    }
+    // Set once we've seeded timestamps for the themes that existed before this
+    // feature was installed, so the baseline is only applied a single time.
+    if (typeof s.themeAddedSeeded !== 'boolean') s.themeAddedSeeded = false;
     // Per-bot themes. When `perBotMode` is on, opening a chat/character that
     // has a bound theme switches to it automatically. Bindings are stored
     // per-bot, keyed by the character's stable `avatar` filename (or by
@@ -185,6 +204,65 @@ function toggleFavorite(themeName) {
     else s.favorites.splice(idx, 1);
     saveSettings();
     return idx === -1;
+}
+
+/* ============================================================
+ * "DATE ADDED" TRACKING
+ * ST keeps themes alphabetically on disk, so <option> order tells us
+ * nothing about when a theme was added. We persist a real timestamp the
+ * first time we ever observe each theme. See getSettings() for details.
+ * ============================================================ */
+
+/**
+ * Seeds timestamps for themes that already existed before this feature was
+ * installed. All pre-existing themes share one baseline time so they sort
+ * below anything imported afterwards. Runs at most once.
+ * @param {string[]} existingNames Theme names currently in #themes.
+ */
+function seedThemeTimestamps(existingNames) {
+    const s = getSettings();
+    if (s.themeAddedSeeded) {
+        // Already seeded once. Still backfill any theme we somehow missed
+        // (e.g. added while the extension was disabled) with the baseline,
+        // so it never floats to the top of "recently added" unexpectedly.
+        let changed = false;
+        const baseline = s.themeAddedBaseline || 0;
+        for (const name of existingNames) {
+            if (!(name in s.themeAddedAt)) { s.themeAddedAt[name] = baseline; changed = true; }
+        }
+        if (changed) saveSettings();
+        return;
+    }
+    const baseline = Date.now();
+    s.themeAddedBaseline = baseline;
+    for (const name of existingNames) {
+        if (!(name in s.themeAddedAt)) s.themeAddedAt[name] = baseline;
+    }
+    s.themeAddedSeeded = true;
+    saveSettings();
+}
+
+/** Records "now" as the add time for a theme, unless already known. */
+function markThemeAdded(name, when = Date.now()) {
+    if (!name) return;
+    const s = getSettings();
+    if (name in s.themeAddedAt) return; // first-seen wins; don't overwrite
+    s.themeAddedAt[name] = when;
+    saveSettings();
+}
+
+/** Returns the recorded add time for a theme, or 0 if unknown. */
+function getThemeAddedAt(name) {
+    return getSettings().themeAddedAt[name] || 0;
+}
+
+/** Drops a theme's stored add time (call when the theme is deleted). */
+function purgeThemeTimestamp(name) {
+    const s = getSettings();
+    if (name in s.themeAddedAt) {
+        delete s.themeAddedAt[name];
+        saveSettings();
+    }
 }
 
 /* ============================================================
@@ -643,6 +721,10 @@ jQuery(async () => {
         //     removed+added pair in the same mutation batch (that's a
         //     re-render, not an import).
         let knownThemes = new Set(Array.from(themeSelect.options).map(o => o.value));
+        // Establish "date added" baseline for everything that already exists,
+        // so genuinely-new imports later get a fresher timestamp and sort on
+        // top under "Recently added".
+        seedThemeTimestamps([...knownThemes]);
         let autoApplyArmed = false;
         setTimeout(() => { autoApplyArmed = true; }, 4000);
         let lastApplyAt = 0;
@@ -665,6 +747,17 @@ jQuery(async () => {
             }
             // Update knownThemes for everything we saw added.
             for (const name of addedInBatch) knownThemes.add(name);
+
+            // Record a real "date added" timestamp for genuinely-new themes:
+            // added in this batch and NOT a simultaneous re-add of something we
+            // just removed (those are re-renders, not imports). markThemeAdded()
+            // is first-seen-wins, so re-renders of known themes are harmless.
+            // We do this regardless of `autoApplyArmed` so timestamps are still
+            // captured for imports that land during the initial settle window.
+            for (const name of addedInBatch) {
+                if (!removedInBatch.has(name)) markThemeAdded(name);
+            }
+
             if (!autoApplyArmed) return;
             // During a bulk import our import flow applies the LAST theme
             // itself; auto-applying every intermediate one is noisy and can
@@ -1022,7 +1115,7 @@ function openThemeManager(themeSelect) {
                             <i class="fa-solid fa-arrow-down-wide-short"></i>
                             <select id="ta_sort_mode" class="ta-sort-select">
                                 <option value="alpha">A → Z</option>
-                                <option value="date">Date added</option>
+                                <option value="date">Recently added</option>
                             </select>
                         </div>
                     </div>
@@ -1056,12 +1149,9 @@ function openThemeManager(themeSelect) {
     const $foldersList = overlay.find('#ta_folders_list');
     const $sortMode = overlay.find('#ta_sort_mode');
 
-    // Date-added index: the order themes appear in the <select> element is the
-    // order ST added them, which matches the on-disk sort (alphabetical by
-    // filename). For a user-perceivable "date added" we use this order and
-    // reverse it so newest is on top.
-    const themeOrder = new Map();
-    allThemes.forEach((n, i) => themeOrder.set(n, i));
+    // Make sure every theme currently in the list has a recorded add time.
+    // backfills get the shared baseline so they never wrongly jump to the top.
+    seedThemeTimestamps(allThemes);
 
     // Currently active folder filter (null = no filter, show everything).
     let activeFolderId = null;
@@ -1127,8 +1217,12 @@ function openThemeManager(themeSelect) {
             const af = favs.has(a), bf = favs.has(b);
             if (af !== bf) return af ? -1 : 1;
             if (mode === 'date') {
-                // Most recently added first. Unknown themes go last.
-                return (themeOrder.get(b) ?? -1) - (themeOrder.get(a) ?? -1);
+                // Most recently added first, using real timestamps. Themes
+                // sharing the baseline (pre-existing ones) tie and fall back
+                // to alphabetical so the order stays stable and predictable.
+                const ta = getThemeAddedAt(a), tb = getThemeAddedAt(b);
+                if (ta !== tb) return tb - ta;
+                return a.localeCompare(b);
             }
             return a.localeCompare(b);
         });
@@ -1775,6 +1869,7 @@ async function bulkDeleteThemes(names, themeSelect) {
             if (fi !== -1) { favs.splice(fi, 1); saveSettings(); }
             purgeThemeFromFolders(name);
             purgeThemeFromBots(name);
+            purgeThemeTimestamp(name);
             await sleep(150);
             ok++;
         } catch (err) {
